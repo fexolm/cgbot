@@ -1,22 +1,18 @@
 use std::io;
 
-use cgbot::rewind_client::RewindClient;
+extern crate cgbot;
+use cgbot::debug::{self, Debug};
 
 fn main() -> io::Result<()> {
     println!("KEK!");
-    let mut client = RewindClient::with_host_port("192.168.0.100", 9111)?;
+    let mut debug = Debug::new();
 
     println!("LOL!");
 
-    for i in 0..10 {
-        client.circle(
-            (50 * i) as f64,
-            (50 * i) as f64,
-            50f64,
-            RewindClient::GREEN,
-            true,
-        )?;
-        client.end_frame()?;
+    for i in 0..100 {
+        debug.circle((50 * i) as f64, (50 * i) as f64, 50f64, debug::GREEN, true);
+        debug.circle_popup((50 * i) as f64, (50 * i) as f64, 50f64, "kekeke");
+        debug.end_frame();
     }
 
     Ok(())
