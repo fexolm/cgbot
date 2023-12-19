@@ -7,12 +7,7 @@ build = "build.rs"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = "1.0.1"
-
-[features]
-default = ["rewind"]
-rewind = []
+rand = "0.8.5"
 
 [build-dependencies]
 rustsourcebundler = { git = "https://github.com/lpenz/rust-sourcebundler" }
