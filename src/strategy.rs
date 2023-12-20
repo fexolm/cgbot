@@ -121,46 +121,20 @@ impl Strategy {
         self.exploration_map.update(world);
         self.score_map.update(world, &self.bounds_detector);
 
-        for drone in world.me.drones.values() {
-            if let Some(monster_pos) = self.find_monster_nearby(drone) {
-                eprintln!("found monster!!");
+        let mut pathfinding =
+            Pathfinding::new(&self.tracker, &self.exploration_map, &self.score_map);
 
-                if (monster_pos - drone.pos).len() < 2000. {
-                    eprintln!("avoiding...");
+        let actions = pathfinding.search(world);
 
-                    let get_out_vec = ((drone.pos - monster_pos) * 100.)
-                        .clamp(Vec2::new(0., 0.), Vec2::new(10000., 10000.));
-                    let (x, y) = (get_out_vec.x as i32, get_out_vec.y as i32);
-                    println!("MOVE {x} {y} 0 AAAAAAA.....");
-                    continue;
-                }
-            }
+        for (i, drone) in world.me.drones.values().enumerate() {
+            let action = actions[i];
 
-            if Self::get_total_live_fishes_count(world)
-                <= Self::get_total_scaned_fishes_count(world)
-            {
-                println!("MOVE {} 0 0", drone.pos.x);
-                continue;
-            }
+            let pos = drone.pos + action.get_move();
+            let (x, y) = (pos.x as usize, pos.y as usize);
 
-            if let Some(pos) = self.find_nearest_target_pos(world, drone) {
-                let light = if (pos - drone.pos).len() < 2000. && drone.bat > 5 {
-                    1
-                } else {
-                    0
-                };
+            let light = if action.get_light() { 1 } else { 0 };
 
-                if light == 1 {
-                    self.exploration_map.use_light(drone.pos);
-                }
-
-                let (x, y) = (pos.x as i32, pos.y as i32);
-                println!("MOVE {x} {y} {light}");
-                continue;
-            }
-
-            eprintln!("Nothing to do: moving upwards");
-            println!("MOVE {} 0 0", drone.pos.x);
+            println!("MOVE {x} {y} {light}");
         }
     }
 }

@@ -66,4 +66,11 @@ impl Vec2 {
             y: self.y.min(other.y),
         }
     }
+
+    pub fn rotate(self, angle: f32) -> Vec2 {
+        Vec2 {
+            x: self.x * angle.cos() - self.y * angle.sin(),
+            y: self.x * angle.sin() + self.y * angle.cos(),
+        }
+    }
 }
