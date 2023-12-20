@@ -6,8 +6,8 @@ use super::vec2::Vec2;
 use super::world::World;
 #[derive(Debug)]
 pub struct Bounds {
-    top_left: Vec2,
-    bot_right: Vec2,
+    pub top_left: Vec2,
+    pub bot_right: Vec2,
 }
 impl Bounds {
     fn new(x1: f32, y1: f32, x2: f32, y2: f32) -> Self {
@@ -88,18 +88,129 @@ impl BoundsDetector {
     }
 }
 }
+pub mod maps {
+use super::{bounds_detector::BoundsDetector, vec2::Vec2, world::World};
+const E_CELLS: usize = 20;
+const E_CELL_SIZE: usize = 10000 / E_CELLS;
+const S_CELLS: usize = 20;
+const S_CELL_SIZE: usize = 10000 / S_CELLS;
+pub struct ExplorationMap {
+    map: [[f32; E_CELLS]; E_CELLS],
+}
+pub struct ScoreMap {
+    map: [[f32; S_CELLS]; S_CELLS],
+}
+fn position_to_grid_cell(pos: Vec2, cell_size: usize) -> (usize, usize) {
+    (pos.x as usize / cell_size, pos.y as usize / cell_size)
+}
+impl ExplorationMap {
+    pub fn new() -> Self {
+        ExplorationMap {
+            map: [[1.; E_CELLS]; E_CELLS],
+        }
+    }
+    const STEP: f32 = 0.05;
+    pub fn update(&mut self, world: &World) {
+        for x in 0..E_CELLS {
+            for y in 0..E_CELLS {
+                if self.map[x][y] < 1. {
+                    self.map[x][y] += Self::STEP;
+                }
+            }
+        }
+        for drone in world.me.drones.values() {
+            let (x, y) = position_to_grid_cell(drone.pos, E_CELL_SIZE);
+            self.map[x][y] = 0.;
+        }
+    }
+    pub fn use_light(&mut self, pos: Vec2) {
+        let (x, y) = position_to_grid_cell(pos, E_CELL_SIZE);
+        let (x, y) = (x as i32, y as i32);
+        for dx in -1..2 {
+            for dy in -1..2 {
+                if x + dx >= 0
+                    && x + dx <= E_CELLS as i32
+                    && y + dy >= 0
+                    && y + dy <= E_CELLS as i32
+                {
+                    self.map[(x + dx) as usize][(y + dy) as usize] = 0.;
+                }
+            }
+        }
+    }
+    pub fn get_score(&self, pos: Vec2) -> f32 {
+        let (x, y) = position_to_grid_cell(pos, E_CELL_SIZE);
+        self.map[x][y]
+    }
+}
+impl ScoreMap {
+    pub fn new() -> Self {
+        ScoreMap {
+            map: [[0.; S_CELLS]; S_CELLS],
+        }
+    }
+    fn is_in_someone_scan(id: i32, world: &World) -> bool {
+        world
+            .me
+            .drones
+            .values()
+            .into_iter()
+            .any(|drone| drone.scans.contains(&id))
+    }
+    fn is_alive(id: i32, world: &World) -> bool {
+        world
+            .me
+            .drones
+            .values()
+            .any(|drone| drone.blips.contains_key(&id))
+    }
+    pub fn update(&mut self, world: &World, bounds_detector: &BoundsDetector) {
+        for x in 0..S_CELLS {
+            for y in 0..S_CELLS {
+                self.map[x][y] = 0.;
+            }
+        }
+        let creatures = world.creatures.values().filter(|c| {
+            c.typ != -1 && Self::is_in_someone_scan(c.id, world) && Self::is_alive(c.id, world)
+        });
+        for c in creatures {
+            let bounds = bounds_detector.get_bounds(c.id);
+            let creature_cost = 3.;
+            let (start_x, start_y) = position_to_grid_cell(bounds.top_left, S_CELL_SIZE);
+            let (end_x, end_y) = position_to_grid_cell(bounds.bot_right, S_CELL_SIZE);
+            let (end_x, end_y) = ((end_x + 1).min(S_CELLS), (end_y + 1).min(S_CELLS));
+            let cells_count = (end_x - start_x) * (end_y - start_y);
+            for x in start_x..end_x {
+                for y in start_y..end_y {
+                    self.map[x][y] += creature_cost / (cells_count as f32)
+                }
+            }
+        }
+    }
+    pub fn get_score(&self, pos: Vec2) -> f32 {
+        let (x, y) = position_to_grid_cell(pos, S_CELL_SIZE);
+        self.map[x][y]
+    }
+}
+}
+pub mod pathfinding {
+}
 pub mod strategy {
 use std::collections::HashSet;
-use super::{bounds_detector::BoundsDetector, tracker::*, vec2::Vec2, world::*};
+use super::*;
 pub struct Strategy {
     bounds_detector: BoundsDetector,
     tracker: Tracker,
+    exploration_map: ExplorationMap,
+    score_map: ScoreMap,
 }
 impl Strategy {
     pub fn new() -> Self {
         Strategy {
             bounds_detector: BoundsDetector::new(),
             tracker: Tracker::new(),
+            exploration_map: ExplorationMap::new(),
+            score_map: ScoreMap::new(),
         }
     }
 }
@@ -159,7 +270,7 @@ impl Strategy {
             None
         }
     }
-    fn get_total_live_fishes_count(&self, world: &World) -> i32 {
+    fn get_total_live_fishes_count(world: &World) -> i32 {
         world
             .me
             .drones
@@ -170,7 +281,7 @@ impl Strategy {
             .collect::<HashSet<i32>>()
             .len() as i32
     }
-    fn get_total_scaned_fishes_count(&self, world: &World) -> i32 {
+    fn get_total_scaned_fishes_count(world: &World) -> i32 {
         world
             .me
             .drones
@@ -180,7 +291,7 @@ impl Strategy {
             .collect::<HashSet<i32>>()
             .len() as i32
     }
-    fn find_monster_nearby(&self, drone: &Drone, world: &World) -> Option<Vec2> {
+    fn find_monster_nearby(&self, drone: &Drone) -> Option<Vec2> {
         self.tracker
             .monsters
             .values()
@@ -190,8 +301,10 @@ impl Strategy {
     pub fn play(&mut self, world: &World) {
         self.tracker.update(world);
         self.bounds_detector.update(world);
+        self.exploration_map.update(world);
+        self.score_map.update(world, &self.bounds_detector);
         for drone in world.me.drones.values() {
-            if let Some(monster_pos) = self.find_monster_nearby(drone, world) {
+            if let Some(monster_pos) = self.find_monster_nearby(drone) {
                 eprintln!("found monster!!");
                 if (monster_pos - drone.pos).len() < 2000. {
                     eprintln!("avoiding...");
@@ -202,13 +315,21 @@ impl Strategy {
                     continue;
                 }
             }
-            if self.get_total_live_fishes_count(world) <= self.get_total_scaned_fishes_count(world)
+            if Self::get_total_live_fishes_count(world)
+                <= Self::get_total_scaned_fishes_count(world)
             {
                 println!("MOVE {} 0 0", drone.pos.x);
                 continue;
             }
             if let Some(pos) = self.find_nearest_target_pos(world, drone) {
-                let light = 0;
+                let light = if (pos - drone.pos).len() < 2000. && drone.bat > 5 {
+                    1
+                } else {
+                    0
+                };
+                if light == 1 {
+                    self.exploration_map.use_light(drone.pos);
+                }
                 let (x, y) = (pos.x as i32, pos.y as i32);
                 println!("MOVE {x} {y} {light}");
                 continue;
@@ -415,6 +536,13 @@ impl World {
     }
 }
 }
+pub use bounds_detector::*;
+pub use maps::*;
+pub use pathfinding::*;
+pub use strategy::*;
+pub use tracker::*;
+pub use vec2::*;
+pub use world::*;
 }
 use std::{collections::HashMap, io};
 use cgbot::{

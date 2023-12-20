@@ -1,10 +1,12 @@
 use std::collections::HashSet;
 
-use super::{bounds_detector::BoundsDetector, tracker::*, vec2::Vec2, world::*};
+use super::*;
 
 pub struct Strategy {
     bounds_detector: BoundsDetector,
     tracker: Tracker,
+    exploration_map: ExplorationMap,
+    score_map: ScoreMap,
 }
 
 impl Strategy {
@@ -12,6 +14,8 @@ impl Strategy {
         Strategy {
             bounds_detector: BoundsDetector::new(),
             tracker: Tracker::new(),
+            exploration_map: ExplorationMap::new(),
+            score_map: ScoreMap::new(),
         }
     }
 }
@@ -80,7 +84,7 @@ impl Strategy {
         }
     }
 
-    fn get_total_live_fishes_count(&self, world: &World) -> i32 {
+    fn get_total_live_fishes_count(world: &World) -> i32 {
         world
             .me
             .drones
@@ -92,7 +96,7 @@ impl Strategy {
             .len() as i32
     }
 
-    fn get_total_scaned_fishes_count(&self, world: &World) -> i32 {
+    fn get_total_scaned_fishes_count(world: &World) -> i32 {
         world
             .me
             .drones
@@ -103,7 +107,7 @@ impl Strategy {
             .len() as i32
     }
 
-    fn find_monster_nearby(&self, drone: &Drone, world: &World) -> Option<Vec2> {
+    fn find_monster_nearby(&self, drone: &Drone) -> Option<Vec2> {
         self.tracker
             .monsters
             .values()
@@ -114,9 +118,11 @@ impl Strategy {
     pub fn play(&mut self, world: &World) {
         self.tracker.update(world);
         self.bounds_detector.update(world);
+        self.exploration_map.update(world);
+        self.score_map.update(world, &self.bounds_detector);
 
         for drone in world.me.drones.values() {
-            if let Some(monster_pos) = self.find_monster_nearby(drone, world) {
+            if let Some(monster_pos) = self.find_monster_nearby(drone) {
                 eprintln!("found monster!!");
 
                 if (monster_pos - drone.pos).len() < 2000. {
@@ -130,20 +136,24 @@ impl Strategy {
                 }
             }
 
-            if self.get_total_live_fishes_count(world) <= self.get_total_scaned_fishes_count(world)
+            if Self::get_total_live_fishes_count(world)
+                <= Self::get_total_scaned_fishes_count(world)
             {
                 println!("MOVE {} 0 0", drone.pos.x);
                 continue;
             }
 
             if let Some(pos) = self.find_nearest_target_pos(world, drone) {
-                // let light = if (pos - drone.pos).len() < 2000. && drone.bat > 5 {
-                //     1
-                // } else {
-                //     0
-                // };
+                let light = if (pos - drone.pos).len() < 2000. && drone.bat > 5 {
+                    1
+                } else {
+                    0
+                };
 
-                let light = 0;
+                if light == 1 {
+                    self.exploration_map.use_light(drone.pos);
+                }
+
                 let (x, y) = (pos.x as i32, pos.y as i32);
                 println!("MOVE {x} {y} {light}");
                 continue;

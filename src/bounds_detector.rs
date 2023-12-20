@@ -7,8 +7,8 @@ use super::world::World;
 
 #[derive(Debug)]
 pub struct Bounds {
-    top_left: Vec2,
-    bot_right: Vec2,
+    pub top_left: Vec2,
+    pub bot_right: Vec2,
 }
 
 impl Bounds {

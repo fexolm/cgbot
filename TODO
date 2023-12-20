@@ -1,0 +1,9 @@
+Maps:
+    ✔ Exploration map @done(23-12-20 17:16)
+    ✔ Probability + score map @done(23-12-20 17:35)
+
+PathPlanning:
+    Genetic algorithm:
+        ☐ Action
+        ☐ Simulation
+        ☐ Score
