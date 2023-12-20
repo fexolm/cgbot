@@ -39,6 +39,10 @@ impl Mul<f32> for Vec2 {
 }
 
 impl Vec2 {
+    pub fn new(x: f32, y: f32) -> Self {
+        Vec2 { x, y }
+    }
+
     pub fn len(self) -> f32 {
         ((self.x * self.x) + (self.y * self.y)).sqrt()
     }
@@ -47,5 +51,19 @@ impl Vec2 {
         let x = self.x.clamp(lt.x, rb.x);
         let y = self.y.clamp(lt.y, rb.y);
         Vec2 { x, y }
+    }
+
+    pub fn max(self, other: Vec2) -> Vec2 {
+        Vec2 {
+            x: self.x.max(other.x),
+            y: self.y.max(other.y),
+        }
+    }
+
+    pub fn min(self, other: Vec2) -> Vec2 {
+        Vec2 {
+            x: self.x.min(other.x),
+            y: self.y.min(other.y),
+        }
     }
 }

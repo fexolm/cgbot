@@ -1,430 +1,270 @@
 pub mod cgbot {
-pub mod simulation {
-use rand::thread_rng;
-use rand::Rng;
-use std::collections::HashSet;
-use std::time::Instant;
+pub mod bounds_detector {
+use std::collections::HashMap;
+use super::world::BlipDirection;
 use super::vec2::Vec2;
 use super::world::World;
-#[derive(Clone, Default)]
-pub struct DroneState {
-    pos: Vec2,
-    scans: HashSet<i32>,
-    battery: i32,
+#[derive(Debug)]
+pub struct Bounds {
+    top_left: Vec2,
+    bot_right: Vec2,
 }
-#[derive(Clone)]
-pub struct FishState {
-    pos: Vec2,
-    id: i32,
-}
-#[derive(Clone)]
-pub struct SimulationState {
-    my_drones: Vec<DroneState>,
-    enemy_drones: Vec<DroneState>,
-    my_scans: HashSet<i32>,
-    enemy_scans: HashSet<i32>,
-    my_score: i32,
-    enemy_score: i32,
-    my_fishes_of_type: [i32; 3],
-    my_fishes_of_color: [i32; 4],
-    enemy_fishes_of_type: [i32; 3],
-    enemy_fishes_of_color: [i32; 4],
-    visited_cells: [[bool; 20]; 20],
-}
-impl SimulationState {
-    fn new(world: &World) -> Self {
-        let mut my_drones = Vec::new();
-        let mut enemy_drones = Vec::new();
-        let mut my_fishes_of_type = [0; 3];
-        let mut my_fishes_of_color = [0; 4];
-        let mut enemy_fishes_of_type = [0; 3];
-        let mut enemy_fishes_of_color = [0; 4];
-        let mut visited_cells = [[false; 20]; 20];
-        let mut my_scans = world.me.scans.clone();
-        let mut enemy_scans = world.opponent.scans.clone();
-        let mut my_score = world.me.score;
-        let mut enemy_score = world.opponent.score;
-        for i in 0..2 {
-            for drone in world.me.drones.values() {
-                let mut drone_state = DroneState {
-                    pos: drone.pos,
-                    battery: drone.bat,
-                    scans: drone.scans.clone(),
-                };
-                my_drones.push(drone_state);
-            }
-        }
-        for drone in world.opponent.drones.values() {
-            let mut drone_state = DroneState {
-                pos: drone.pos,
-                battery: drone.bat,
-                scans: drone.scans.clone(),
-            };
-            enemy_drones.push(drone_state);
-        }
-        for scan in &world.me.scans {
-            if let Some(creature) = world.creatures.get(&scan) {
-                my_fishes_of_type[creature.typ as usize] += 1;
-                my_fishes_of_color[creature.color as usize] += 1;
-            } else {
-                eprintln!("222");
-            }
-        }
-        for scan in &world.opponent.scans {
-            if let Some(creature) = world.creatures.get(&scan) {
-                enemy_fishes_of_type[creature.typ as usize] += 1;
-                enemy_fishes_of_color[creature.color as usize] += 1;
-            } else {
-                eprintln!("333");
-            }
-        }
-        SimulationState {
-            my_drones,
-            enemy_drones,
-            my_fishes_of_type,
-            enemy_fishes_of_type,
-            my_fishes_of_color,
-            enemy_fishes_of_color,
-            enemy_scans,
-            enemy_score,
-            my_scans,
-            my_score,
-            visited_cells,
+impl Bounds {
+    fn new(x1: f32, y1: f32, x2: f32, y2: f32) -> Self {
+        Bounds {
+            top_left: Vec2::new(x1, y1),
+            bot_right: Vec2::new(x2, y2),
         }
     }
-    fn evaluate_scans(&mut self, world: &World, idx: usize, mine: bool) {
-        if mine {
-            if let Some(drone) = self.my_drones.get(idx) {
-                for id in drone.scans.iter() {
-                    let fish = world.creatures.get(&id).unwrap();
-                    let mut points = fish.typ as i32 + 1;
-                    if !self.enemy_scans.contains(&id) {
-                        points *= 2;
-                    }
-                    self.my_fishes_of_type[fish.typ as usize] += 1;
-                    self.my_fishes_of_color[fish.color as usize] += 1;
-                    if self.my_fishes_of_type[fish.typ as usize] == 4 {
-                        points += if self.enemy_fishes_of_type[fish.typ as usize] == 4 {
-                            4
-                        } else {
-                            8
-                        }
-                    }
-                    if self.my_fishes_of_color[fish.color as usize] == 3 {
-                        points += if self.enemy_fishes_of_color[fish.color as usize] == 3 {
-                            3
-                        } else {
-                            6
-                        }
-                    }
-                    self.my_scans.insert(*id);
-                    self.my_score += points
-                }
-                for scan in &self.my_scans {
-                    for i in 0..2 {
-                        self.my_drones[i].scans.remove(&scan);
-                    }
-                }
-            } else {
-                eprintln!("444");
-            }
-        } else {
-            if let Some(drone) = self.enemy_drones.get(idx) {
-                for id in drone.scans.iter() {
-                    if let Some(fish) = world.creatures.get(&id) {
-                        let mut points = fish.typ as i32 + 1;
-                        if !self.my_scans.contains(&id) {
-                            points *= 2;
-                        }
-                        self.enemy_fishes_of_type[fish.typ as usize] += 1;
-                        self.enemy_fishes_of_color[fish.color as usize] += 1;
-                        if self.enemy_fishes_of_type[fish.typ as usize] == 4 {
-                            points += if self.my_fishes_of_type[fish.typ as usize] == 4 {
-                                4
-                            } else {
-                                8
-                            }
-                        }
-                        if self.enemy_fishes_of_color[fish.color as usize] == 3 {
-                            points += if self.my_fishes_of_color[fish.color as usize] == 3 {
-                                3
-                            } else {
-                                6
-                            }
-                        }
-                        self.enemy_scans.insert(*id);
-                        self.enemy_score += points
-                    } else {
-                        eprintln!("777");
-                    }
-                }
-                for scan in &self.enemy_scans {
-                    for i in 0..2 {
-                        self.enemy_drones[i].scans.remove(&scan);
-                    }
-                }
-            } else {
-                eprintln!("666");
-            }
-        }
+    fn intersect(&mut self, other: &Bounds) {
+        self.top_left = self.top_left.max(other.top_left);
+        self.bot_right = self.bot_right.min(other.bot_right);
     }
-    fn score(&self, cells: &[[f32; 20]; 20]) -> i32 {
-        let mut score = (self.my_score - self.enemy_score) * 100;
-        let mut exploration_score = 0.;
-        for x in 0..20 {
-            for y in 0..20 {
-                if self.visited_cells[y][x] {
-                    exploration_score += cells[y][x];
-                }
-            }
-        }
-        score + exploration_score as i32
+    fn extend(&mut self, size: f32) {
+        self.top_left.x -= size;
+        self.top_left.y -= size;
+        self.bot_right.x += size;
+        self.bot_right.y += size;
+    }
+    pub fn get_center(&self) -> Vec2 {
+        (self.bot_right + self.top_left) * 0.5
     }
 }
-#[derive(Clone, Copy)]
-pub struct Action {
-    pub mov: Option<Vec2>,
-    pub light: bool,
+pub struct BoundsDetector {
+    bounds: HashMap<i32, Bounds>,
 }
-fn evaluate_scans(
-    world: &World,
-    drone: &mut DroneState,
-    scans: &mut HashSet<i32>,
-    other_scans: &HashSet<i32>,
-) -> i32 {
-    let mut res = 0;
-    for scan in &drone.scans {}
-    drone.scans.clear();
-    res
-}
-pub fn simulate(
-    world: &World,
-    state: &mut SimulationState,
-    my_actions: &[Action; 2],
-    enemy_actions: &[Action; 2],
-    iters: i32,
-) {
-    for iter in 0..iters {
-        for i in 0..2 {
-            let mut pos = state.my_drones[i].pos;
-            if let Some(mov) = my_actions[i].mov {
-                pos = state.my_drones[i].pos + mov
-            } else {
-                pos = state.my_drones[i].pos + Vec2 { x: 0., y: -300. }
-            }
-            pos = state.my_drones[i].pos.clamp(
-                Vec2 { x: 0., y: 0. },
-                Vec2 {
-                    x: 10000.,
-                    y: 10000.,
-                },
-            );
-            if pos.y < 500. {
-                state.evaluate_scans(world, i, true);
-            }
-            state.visited_cells[(pos.y / 500.) as usize][(pos.x / 500.) as usize] = true;
-            if iter == 0 && my_actions[i].light && state.my_drones[i].battery >= 5 {
-                for dx in -1..2 {
-                    for dy in -1..2 {
-                        let x = (((pos.x / 500.) as i32) + dx).clamp(0, 10);
-                        let y = (((pos.y / 500.) as i32) + dy).clamp(0, 10);
-                        state.visited_cells[y as usize][x as usize] = true;
-                    }
-                }
-                state.my_drones[i].battery -= 5;
-            } else {
-                state.my_drones[i].battery += 1;
-            }
-            state.my_drones[i].pos = pos;
-        }
-        for i in 0..2 {
-            if let Some(mov) = enemy_actions[i].mov {
-                state.enemy_drones[i].pos = state.enemy_drones[i].pos + mov
-            } else {
-                state.my_drones[i].pos = state.my_drones[i].pos + Vec2 { x: 0., y: -300. }
-            }
-            state.enemy_drones[i].pos = state.enemy_drones[i].pos.clamp(
-                Vec2 { x: 0., y: 0. },
-                Vec2 {
-                    x: 10000.,
-                    y: 10000.,
-                },
-            );
-            if state.enemy_drones[i].pos.y < 500. {
-                state.evaluate_scans(world, i, false);
-            }
-        }
-    }
-}
-fn simulate_many(
-    world: &World,
-    state: &mut SimulationState,
-    my_actions: &Vec<[Action; 2]>,
-    enemy_actions: &Vec<[Action; 2]>,
-    iters: i32,
-) {
-    for i in 0..my_actions.len() {
-        simulate(world, state, &my_actions[i], &enemy_actions[i], iters)
-    }
-}
-fn random_action() -> Action {
-    let mut rng = rand::thread_rng();
-    let mov = match rng.gen_range(0..8) {
-        0 => Vec2 { x: -400., y: -400. },
-        1 => Vec2 { x: -600., y: 0. },
-        2 => Vec2 { x: -400., y: 400. },
-        3 => Vec2 { x: 0., y: -600. },
-        4 => Vec2 { x: 0., y: 600. },
-        5 => Vec2 { x: 400., y: -400. },
-        6 => Vec2 { x: 600., y: 0. },
-        7 => Vec2 { x: 400., y: 400. },
+fn get_bounds_for_type(typ: i8) -> Bounds {
+    match typ {
+        -1 => Bounds::new(0., 0., 10000., 10000.),
+        0 => Bounds::new(0., 2500., 10000., 5000.),
+        1 => Bounds::new(0., 5000., 10000., 7500.),
+        2 => Bounds::new(0., 7500., 10000., 10000.),
         _ => unreachable!(),
-    };
-    Action {
-        mov: Some(mov),
-        light: rng.gen_range(0..4) == 1,
     }
 }
-fn up_action() -> Action {
-    let mov = Vec2 { x: 0., y: -800. };
-    Action {
-        mov: Some(mov),
-        light: true,
+fn get_directional_bounds(dir: BlipDirection, pos: Vec2) -> Bounds {
+    match dir {
+        BlipDirection::TL => Bounds::new(0., 0., pos.x, pos.y),
+        BlipDirection::TR => Bounds::new(pos.x, 0., 10000., pos.y),
+        BlipDirection::BL => Bounds::new(0., pos.y, pos.x, 10000.),
+        BlipDirection::BR => Bounds::new(pos.x, pos.y, 10000., 10000.),
     }
 }
-fn generate_random_actions(size: usize) -> Vec<[Action; 2]> {
-    let mut res = Vec::with_capacity(size);
-    for i in 0..size {
-        res.push([random_action(), random_action()]);
-    }
-    res
-}
-fn generate_opponent_actions(size: usize) -> Vec<[Action; 2]> {
-    let mut res = Vec::with_capacity(size);
-    for i in 0..size {
-        res.push([up_action(), up_action()]);
-    }
-    res
-}
-pub struct Solver {
-    prev_best: Vec<[Action; 2]>,
-}
-impl Solver {
+impl BoundsDetector {
     pub fn new() -> Self {
-        let prev_best = generate_random_actions(10);
-        Solver { prev_best }
+        BoundsDetector {
+            bounds: HashMap::new(),
+        }
     }
-    pub fn find_best_action(&mut self, world: &World, cells: &[[f32; 20]; 20]) -> Vec<Action> {
-        let mut best_actions: Vec<[Action; 2]> = self.prev_best.clone();
-        best_actions.remove(0);
-        best_actions.push([random_action(), random_action()]);
-        let opponent_actions = generate_opponent_actions(10);
-        let start = Instant::now();
-        let initial_state = SimulationState::new(world);
-        let mut current_state: SimulationState = initial_state.clone();
-        simulate_many(
-            world,
-            &mut current_state,
-            &best_actions,
-            &opponent_actions,
-            3,
-        );
-        let mut best_score = current_state.score(cells);
-        let mut best_my_score = current_state.my_score;
-        let mut iters = 0;
-        while Instant::now().duration_since(start).as_millis() < 30 {
-            iters += 1;
-            let current_actions = generate_random_actions(10);
-            let mut current_state: SimulationState = initial_state.clone();
-            simulate_many(
-                world,
-                &mut current_state,
-                &current_actions,
-                &opponent_actions,
-                5,
-            );
-            let current_score = current_state.score(cells);
-            if current_score > best_score {
-                best_actions = current_actions;
-                best_score = current_score;
+    fn initialize(&mut self, world: &World) {
+        if self.bounds.is_empty() {
+            for c in world.creatures.values() {
+                self.bounds.insert(c.id, get_bounds_for_type(c.typ));
             }
         }
-        let mut current_state: SimulationState = initial_state.clone();
-        simulate_many(
-            world,
-            &mut current_state,
-            &opponent_actions,
-            &opponent_actions,
-            3,
-        );
-        eprintln!("Iterations count: {iters}");
-        eprintln!("Best score: {best_score}");
-        eprintln!("Best my score: {best_my_score}");
-        self.prev_best = best_actions.clone();
-        vec![best_actions[0][0], best_actions[0][1]]
+    }
+    fn extend_bounds(&mut self, world: &World) {
+        for c in world.creatures.values() {
+            let bounds = self.bounds.get_mut(&c.id).unwrap();
+            bounds.extend(200.);
+            bounds.intersect(&get_bounds_for_type(c.typ));
+        }
+    }
+    fn handle_blips(&mut self, world: &World) {
+        for drone in world.me.drones.values() {
+            for (id, blip) in &drone.blips {
+                let bounds = self.bounds.get_mut(&id).unwrap();
+                bounds.intersect(&get_directional_bounds(*blip, drone.pos));
+            }
+        }
+    }
+    pub fn update(&mut self, world: &World) {
+        self.initialize(world);
+        self.extend_bounds(world);
+        self.handle_blips(world);
+    }
+    pub fn get_bounds(&self, id: i32) -> &Bounds {
+        self.bounds.get(&id).unwrap()
     }
 }
 }
 pub mod strategy {
-use super::simulation;
-use super::{
-    simulation::*,
-    vec2::Vec2,
-    world::{BlipDirection, Drone, World},
-};
+use std::collections::HashSet;
+use super::{bounds_detector::BoundsDetector, tracker::*, vec2::Vec2, world::*};
 pub struct Strategy {
-    solver: Solver,
-    cells: [[f32; 20]; 20],
+    bounds_detector: BoundsDetector,
+    tracker: Tracker,
 }
 impl Strategy {
     pub fn new() -> Self {
         Strategy {
-            solver: Solver::new(),
-            cells: [[1.; 20]; 20],
+            bounds_detector: BoundsDetector::new(),
+            tracker: Tracker::new(),
         }
     }
 }
 impl Strategy {
-    pub fn play(&mut self, world: &World) {
-        let mut solver = Solver::new();
-        let actions = solver.find_best_action(world, &self.cells);
-        for (action, drone) in actions.iter().zip(world.me.drones.values()) {
-            let light = action.light as i32;
-            if let Some(mov) = action.mov {
-                let Vec2 { x, y } = (drone.pos + mov).clamp(
-                    Vec2 { x: 0., y: 0. },
-                    Vec2 {
-                        x: 10000.,
-                        y: 10000.,
-                    },
-                );
-                self.cells[(y / 500.) as usize][(x / 500.) as usize] = 0.;
-                if drone.bat >= 5 && action.light {
-                    for dx in -1..2 {
-                        for dy in -1..2 {
-                            let x = (((x / 500.) as i32) + dx).clamp(0, 10);
-                            let y = (((y / 500.) as i32) + dy).clamp(0, 10);
-                            self.cells[y as usize][x as usize] = 0.;
-                        }
-                    }
+    fn is_in_someone_scan(&self, id: i32, world: &World) -> bool {
+        world
+            .me
+            .drones
+            .values()
+            .into_iter()
+            .any(|drone| drone.scans.contains(&id))
+    }
+    fn is_alive(&self, id: i32, world: &World) -> bool {
+        world
+            .me
+            .drones
+            .values()
+            .any(|drone| drone.blips.contains_key(&id))
+    }
+    fn find_nearest_target_pos(&self, world: &World, drone: &Drone) -> Option<Vec2> {
+        let other_drone = world.me.drones.values().find(|d| d.id != drone.id).unwrap();
+        if let Some(target) = world
+            .creatures
+            .values()
+            .filter(|c| {
+                !world.me.scans.contains(&c.id)
+                    && !self.is_in_someone_scan(c.id, world)
+                    && self.is_alive(c.id, world)
+                    && c.typ != -1
+            })
+            .min_by_key(|c| {
+                let bounds_center = self.bounds_detector.get_bounds(c.id).get_center();
+                let dist_to_center = (bounds_center - drone.pos).len();
+                let dist_to_other_drone = (bounds_center - other_drone.pos).len();
+                (dist_to_center - (dist_to_other_drone / 3.)) as i32
+            })
+        {
+            let bounds = self.bounds_detector.get_bounds(target.id);
+            eprintln!("Moving to target {} with bounds: {:#?}", target.id, bounds);
+            Some(bounds.get_center())
+        } else {
+            for c in world.creatures.values() {
+                if world.me.scans.contains(&c.id) {
+                    eprintln!("{} is in my scans...", c.id);
+                    continue;
                 }
-                println!("MOVE {x} {y} {light}");
-            } else {
-                let x = drone.pos.x;
-                let y = (drone.pos.y - 300.).clamp(0., 10000.);
-                self.cells[(y / 500.) as usize][(x / 500.) as usize] = 0.;
-                if drone.bat >= 5 && action.light {
-                    for dx in -1..2 {
-                        for dy in -1..2 {
-                            let x = (((x / 500.) as i32) + dx).clamp(0, 10);
-                            let y = (((y / 500.) as i32) + dy).clamp(0, 10);
-                            self.cells[y as usize][x as usize] = 0.;
-                        }
-                    }
+                if self.is_in_someone_scan(c.id, world) {
+                    eprintln!("{} is in drone scans...", c.id);
+                    continue;
                 }
-                println!("WAIT {light}");
+                if c.typ == -1 {
+                    eprintln!("{} is a monster...", c.id);
+                    continue;
+                }
+                eprintln!("{} is OK!!", c.id);
             }
+            None
         }
+    }
+    fn get_total_live_fishes_count(&self, world: &World) -> i32 {
+        world
+            .me
+            .drones
+            .values()
+            .flat_map(|d| &d.blips)
+            .map(|(&id, _)| id)
+            .filter(|&id| !world.me.scans.contains(&id))
+            .collect::<HashSet<i32>>()
+            .len() as i32
+    }
+    fn get_total_scaned_fishes_count(&self, world: &World) -> i32 {
+        world
+            .me
+            .drones
+            .values()
+            .flat_map(|d| &d.scans)
+            .copied()
+            .collect::<HashSet<i32>>()
+            .len() as i32
+    }
+    fn find_monster_nearby(&self, drone: &Drone, world: &World) -> Option<Vec2> {
+        self.tracker
+            .monsters
+            .values()
+            .map(|m| m.pos)
+            .min_by_key(|&pos| (pos - drone.pos).len() as i32)
+    }
+    pub fn play(&mut self, world: &World) {
+        self.tracker.update(world);
+        self.bounds_detector.update(world);
+        for drone in world.me.drones.values() {
+            if let Some(monster_pos) = self.find_monster_nearby(drone, world) {
+                eprintln!("found monster!!");
+                if (monster_pos - drone.pos).len() < 2000. {
+                    eprintln!("avoiding...");
+                    let get_out_vec = ((drone.pos - monster_pos) * 100.)
+                        .clamp(Vec2::new(0., 0.), Vec2::new(10000., 10000.));
+                    let (x, y) = (get_out_vec.x as i32, get_out_vec.y as i32);
+                    println!("MOVE {x} {y} 0 AAAAAAA.....");
+                    continue;
+                }
+            }
+            if self.get_total_live_fishes_count(world) <= self.get_total_scaned_fishes_count(world)
+            {
+                println!("MOVE {} 0 0", drone.pos.x);
+                continue;
+            }
+            if let Some(pos) = self.find_nearest_target_pos(world, drone) {
+                let light = 0;
+                let (x, y) = (pos.x as i32, pos.y as i32);
+                println!("MOVE {x} {y} {light}");
+                continue;
+            }
+            eprintln!("Nothing to do: moving upwards");
+            println!("MOVE {} 0 0", drone.pos.x);
+        }
+    }
+}
+}
+pub mod tracker {
+use std::collections::HashMap;
+use super::vec2::Vec2;
+use super::world::World;
+pub struct Monster {
+    pub pos: Vec2,
+    pub vel: Vec2,
+}
+pub struct Tracker {
+    pub monsters: HashMap<i32, Monster>,
+}
+impl Tracker {
+    pub fn new() -> Self {
+        Tracker {
+            monsters: HashMap::new(),
+        }
+    }
+    fn update_positions(&mut self) {
+        for m in self.monsters.values_mut() {
+            m.pos = m.pos + m.vel;
+            if m.pos.x < 0.0 || m.pos.x > 10000. {
+                m.vel.x = -m.vel.x;
+            }
+            if m.pos.y < 2500. || m.pos.y > 10000. {
+                m.vel.y = -m.vel.y;
+            }
+            m.pos = m.pos.clamp(Vec2::new(0., 2500.), Vec2::new(10000., 10000.));
+        }
+    }
+    fn update_visible(&mut self, world: &World) {
+        for creature in world.creatures.values() {
+            if creature.typ != -1 || creature.pos.is_none() {
+                continue;
+            }
+            self.monsters.insert(
+                creature.id,
+                Monster {
+                    pos: creature.pos.unwrap(),
+                    vel: creature.speed.unwrap(),
+                },
+            );
+        }
+    }
+    pub fn update(&mut self, world: &World) {
+        self.update_positions();
+        self.update_visible(world);
     }
 }
 }
@@ -463,6 +303,9 @@ impl Mul<f32> for Vec2 {
     }
 }
 impl Vec2 {
+    pub fn new(x: f32, y: f32) -> Self {
+        Vec2 { x, y }
+    }
     pub fn len(self) -> f32 {
         ((self.x * self.x) + (self.y * self.y)).sqrt()
     }
@@ -470,6 +313,18 @@ impl Vec2 {
         let x = self.x.clamp(lt.x, rb.x);
         let y = self.y.clamp(lt.y, rb.y);
         Vec2 { x, y }
+    }
+    pub fn max(self, other: Vec2) -> Vec2 {
+        Vec2 {
+            x: self.x.max(other.x),
+            y: self.y.max(other.y),
+        }
+    }
+    pub fn min(self, other: Vec2) -> Vec2 {
+        Vec2 {
+            x: self.x.min(other.x),
+            y: self.y.min(other.y),
+        }
     }
 }
 }
