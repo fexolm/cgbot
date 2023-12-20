@@ -14,7 +14,18 @@ macro_rules! parse_input {
     };
 }
 
+#[cfg(debug_assertions)]
+fn check_debug() {
+    eprintln!("Debugging enabled");
+}
+
+#[cfg(not(debug_assertions))]
+fn check_debug() {
+    eprintln!("Debugging disabled");
+}
+
 fn main() {
+    check_debug();
     let mut input_line = String::new();
     io::stdin().read_line(&mut input_line).unwrap();
 

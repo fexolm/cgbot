@@ -244,7 +244,7 @@ impl ScoreMap {
 }
 }
 pub mod pathfinding {
-use std::{default, f32::consts::PI, time::Instant};
+use std::{f32::consts::PI, time::Instant};
 use rand::Rng;
 use super::*;
 #[derive(Default, Clone, Copy)]
@@ -342,33 +342,174 @@ impl GameState {
         }
     }
 }
-const GENE_SIZE: usize = 20;
+const GENE_SIZE: usize = 25;
 const POPULATION_SIZE: usize = 30;
 const MUTATIONS_SIZE: usize = 30;
 const MUTATIONS_COUNT: usize = 3;
 const RANDOM_SIZE: usize = 10;
 const CROSSOVER_SIZE: usize = 20;
 type Gene = [[Action; 2]; GENE_SIZE];
-pub struct Pathfinding<'a> {
-    population: Vec<(f32, Gene)>,
+struct Simulation<'a> {
     tracker: &'a Tracker,
     exploration_map: &'a ExplorationMap,
     score_map: &'a ScoreMap,
 }
-impl<'a> Pathfinding<'a> {
+pub struct Pathfinding {
+    population: Vec<(f32, Gene)>,
+}
+impl Pathfinding {
+    pub fn new() -> Self {
+        Pathfinding {
+            population: Vec::new(),
+        }
+    }
+    fn random_actions(&self) -> [Action; 2] {
+        let mut rng = rand::thread_rng();
+        let mut actions: [Action; 2] = Default::default();
+        for action in &mut actions {
+            action.light = rng.gen_bool(0.5);
+            action.angle = rng.gen_range(-PI..PI);
+        }
+        actions
+    }
+    fn random_gene(&self) -> Gene {
+        let mut rng = rand::thread_rng();
+        let mut gene = Gene::default();
+        for actions in &mut gene {
+            for action in actions {
+                action.angle = rng.gen_range(-PI..PI);
+                action.light = rng.gen_bool(0.5);
+            }
+        }
+        gene
+    }
+    fn mutation(&mut self, simulation: &Simulation, state_proto: &GameState) {
+        let mut rng = rand::thread_rng();
+        let population_size = self.population.len();
+        for _ in 0..MUTATIONS_SIZE {
+            let idx = rng.gen_range(0..population_size);
+            let (_, mut new_gene) = self.population[idx].clone();
+            for _ in 0..MUTATIONS_COUNT {
+                let mut_idx = rng.gen_range(0..new_gene.len());
+                new_gene[mut_idx] = self.random_actions();
+            }
+            let mut state = state_proto.clone();
+            simulation.simulate_all(&mut state, &new_gene);
+            self.population.push((state.score, new_gene));
+        }
+    }
+    fn crossover(&mut self, simulation: &Simulation, state_proto: &GameState) {
+        let mut rng = rand::thread_rng();
+        let population_size = self.population.len();
+        for _ in 0..CROSSOVER_SIZE {
+            let idx1 = rng.gen_range(0..population_size);
+            let mut idx2 = rng.gen_range(0..population_size);
+            while idx2 == idx1 {
+                idx2 = rng.gen_range(0..population_size);
+            }
+            let (_, gene1) = &self.population[idx1];
+            let (_, gene2) = &self.population[idx2];
+            let mut new_gene1 = gene1.clone();
+            let mut new_gene2 = gene2.clone();
+            let mut new_gene11 = gene1.clone();
+            let mut new_gene22 = gene2.clone();
+            for i in 0..gene1.len() {
+                new_gene1[i][0] = gene2[i][0];
+                new_gene11[i][0] = gene2[i][1];
+                new_gene2[i][0] = gene1[i][0];
+                new_gene22[i][1] = gene1[i][1];
+            }
+            let mut state = state_proto.clone();
+            simulation.simulate_all(&mut state, &new_gene1);
+            self.population.push((state.score, new_gene1));
+            let mut state = state_proto.clone();
+            simulation.simulate_all(&mut state, &new_gene2);
+            self.population.push((state.score, new_gene2));
+            let mut state = state_proto.clone();
+            simulation.simulate_all(&mut state, &new_gene11);
+            self.population.push((state.score, new_gene11));
+            let mut state = state_proto.clone();
+            simulation.simulate_all(&mut state, &new_gene22);
+            self.population.push((state.score, new_gene22));
+        }
+    }
+    fn add_randoms(&mut self, simulation: &Simulation, state_proto: &GameState) {
+        for _ in 0..RANDOM_SIZE {
+            let gene = self.random_gene();
+            let mut state = state_proto.clone();
+            simulation.simulate_all(&mut state, &gene);
+            self.population.push((state.score, gene));
+        }
+    }
+    fn selection(&mut self) {
+        self.population
+            .sort_by_key(|(score, _)| -(score * 100.) as i32);
+        self.population.truncate(POPULATION_SIZE);
+    }
+    fn modify_prev_generation(&mut self, simulation: &Simulation, state_proto: &GameState) {
+        let mut old_population = self.population.clone();
+        self.population.clear();
+        for (_, action) in &mut old_population {
+            let mut gene = Gene::default();
+            for i in 1..action.len() {
+                gene[i - 1] = action[i];
+            }
+            gene[gene.len() - 1] = self.random_actions();
+            let mut state = state_proto.clone();
+            simulation.simulate_all(&mut state, &gene);
+            self.population.push((state.score, gene));
+        }
+    }
+    pub fn search(
+        &mut self,
+        world: &World,
+        tracker: &Tracker,
+        exploration_map: &ExplorationMap,
+        score_map: &ScoreMap,
+    ) -> [Action; 2] {
+        let start = Instant::now();
+        let state_proto = GameState::new(world);
+        let simulation = Simulation::new(tracker, exploration_map, score_map);
+        self.modify_prev_generation(&simulation, &state_proto);
+        for _ in 0..POPULATION_SIZE {
+            let gene = self.random_gene();
+            let mut state = state_proto.clone();
+            simulation.simulate_all(&mut state, &gene);
+            self.population.push((state.score, gene));
+        }
+        let mut iter = 0;
+        while Instant::now().duration_since(start).as_millis() < 40 {
+            iter += 1;
+            if iter % 5 == 0 {
+                self.crossover(&simulation, &state_proto);
+            }
+            self.add_randoms(&simulation, &state_proto);
+            self.mutation(&simulation, &state_proto);
+            self.selection();
+        }
+        let (best_score, best_actions) = self.population[0];
+        eprintln!("Iterations count: {iter}");
+        eprintln!("Best score: {best_score}");
+        let esum: f32 = simulation.exploration_map.map.iter().flatten().sum();
+        let ssum: f32 = simulation.score_map.map.iter().flatten().sum();
+        eprintln!("esum: {esum}");
+        eprintln!("ssum: {ssum}");
+        best_actions[0]
+    }
+}
+impl<'a> Simulation<'a> {
     pub fn new(
         tracker: &'a Tracker,
         exploration_map: &'a ExplorationMap,
         score_map: &'a ScoreMap,
     ) -> Self {
-        Pathfinding {
-            population: Vec::new(),
+        Simulation {
             tracker,
             exploration_map,
             score_map,
         }
     }
-    fn simulate(&self, state: &mut GameState, world: &World, actions: &[Action; 2], iter: usize) {
+    fn simulate(&self, state: &mut GameState, actions: &[Action; 2], iter: usize) {
         for i in 0..2 {
             let drone = &mut state.drones[i];
             if drone.dead {
@@ -421,133 +562,22 @@ impl<'a> Pathfinding<'a> {
             }
         }
     }
-    fn simulate_all(&self, state: &mut GameState, world: &World, gene: &Gene) {
+    fn simulate_all(&self, state: &mut GameState, gene: &Gene) {
         for (iter, action) in gene.iter().enumerate() {
-            self.simulate(state, world, action, iter + 1);
+            self.simulate(state, action, iter + 1);
         }
         state.score += (state.drones[0].bat + state.drones[1].bat) as f32 / 30.
-    }
-    fn random_actions(&self) -> [Action; 2] {
-        let mut rng = rand::thread_rng();
-        let mut actions: [Action; 2] = Default::default();
-        for action in &mut actions {
-            action.light = rng.gen_bool(0.5);
-            action.angle = rng.gen_range(-PI..PI);
-        }
-        actions
-    }
-    fn random_gene(&self) -> Gene {
-        let mut rng = rand::thread_rng();
-        let mut gene = Gene::default();
-        for actions in &mut gene {
-            for action in actions {
-                action.angle = rng.gen_range(-PI..PI);
-                action.light = rng.gen_bool(0.5);
-            }
-        }
-        gene
-    }
-    fn mutation(&mut self, world: &World, state_proto: &GameState) {
-        let mut rng = rand::thread_rng();
-        let population_size = self.population.len();
-        for _ in 0..MUTATIONS_SIZE {
-            let idx = rng.gen_range(0..population_size);
-            let (_, mut new_gene) = self.population[idx].clone();
-            for _ in 0..MUTATIONS_COUNT {
-                let mut_idx = rng.gen_range(0..new_gene.len());
-                new_gene[mut_idx] = self.random_actions();
-            }
-            let mut state = state_proto.clone();
-            self.simulate_all(&mut state, world, &new_gene);
-            self.population.push((state.score, new_gene));
-        }
-    }
-    fn crossover(&mut self, world: &World, state_proto: &GameState) {
-        let mut rng = rand::thread_rng();
-        let population_size = self.population.len();
-        for _ in 0..CROSSOVER_SIZE {
-            let idx1 = rng.gen_range(0..population_size);
-            let mut idx2 = rng.gen_range(0..population_size);
-            while idx2 == idx1 {
-                idx2 = rng.gen_range(0..population_size);
-            }
-            let (_, gene1) = &self.population[idx1];
-            let (_, gene2) = &self.population[idx2];
-            let mut new_gene1 = gene1.clone();
-            let mut new_gene2 = gene2.clone();
-            let mut new_gene11 = gene1.clone();
-            let mut new_gene22 = gene2.clone();
-            for i in 0..gene1.len() {
-                new_gene1[i][0] = gene2[i][0];
-                new_gene11[i][0] = gene2[i][1];
-                new_gene2[i][0] = gene1[i][0];
-                new_gene2[i][1] = gene1[i][1];
-            }
-            let mut state = state_proto.clone();
-            self.simulate_all(&mut state, world, &new_gene1);
-            self.population.push((state.score, new_gene1));
-            let mut state = state_proto.clone();
-            self.simulate_all(&mut state, world, &new_gene2);
-            self.population.push((state.score, new_gene2));
-            let mut state = state_proto.clone();
-            self.simulate_all(&mut state, world, &new_gene11);
-            self.population.push((state.score, new_gene11));
-            let mut state = state_proto.clone();
-            self.simulate_all(&mut state, world, &new_gene22);
-            self.population.push((state.score, new_gene22));
-        }
-    }
-    fn add_randoms(&mut self, world: &World, state_proto: &GameState) {
-        for i in 0..RANDOM_SIZE {
-            let gene = self.random_gene();
-            let mut state = state_proto.clone();
-            self.simulate_all(&mut state, world, &gene);
-            self.population.push((state.score, gene));
-        }
-    }
-    fn selection(&mut self, world: &World, state_proto: &GameState) {
-        self.population
-            .sort_by_key(|(score, _)| -(score * 100.) as i32);
-        self.population.truncate(POPULATION_SIZE);
-    }
-    pub fn search(&mut self, world: &World) -> [Action; 2] {
-        let start = Instant::now();
-        let state_proto = GameState::new(world);
-        for _ in 0..POPULATION_SIZE {
-            let gene = self.random_gene();
-            let mut state = state_proto.clone();
-            self.simulate_all(&mut state, world, &gene);
-            self.population.push((state.score, gene));
-        }
-        let mut iter = 0;
-        while Instant::now().duration_since(start).as_millis() < 40 {
-            iter += 1;
-            if iter % 5 == 0 {
-                self.crossover(world, &state_proto);
-            }
-            self.add_randoms(world, &state_proto);
-            self.mutation(world, &state_proto);
-            self.selection(world, &state_proto);
-        }
-        let (best_score, best_actions) = self.population[0];
-        eprintln!("Iterations count: {iter}");
-        eprintln!("Best score: {best_score}");
-        let esum: f32 = self.exploration_map.map.iter().flatten().sum();
-        let ssum: f32 = self.score_map.map.iter().flatten().sum();
-        eprintln!("esum: {esum}");
-        eprintln!("ssum: {ssum}");
-        best_actions[0]
     }
 }
 }
 pub mod strategy {
-use std::collections::HashSet;
 use super::*;
 pub struct Strategy {
     bounds_detector: BoundsDetector,
     tracker: Tracker,
     exploration_map: ExplorationMap,
     score_map: ScoreMap,
+    pathfinding: Pathfinding,
 }
 impl Strategy {
     pub fn new() -> Self {
@@ -556,101 +586,19 @@ impl Strategy {
             tracker: Tracker::new(),
             exploration_map: ExplorationMap::new(),
             score_map: ScoreMap::new(),
+            pathfinding: Pathfinding::new(),
         }
     }
 }
 impl Strategy {
-    fn is_in_someone_scan(&self, id: i32, world: &World) -> bool {
-        world
-            .me
-            .drones
-            .values()
-            .into_iter()
-            .any(|drone| drone.scans.contains(&id))
-    }
-    fn is_alive(&self, id: i32, world: &World) -> bool {
-        world
-            .me
-            .drones
-            .values()
-            .any(|drone| drone.blips.contains_key(&id))
-    }
-    fn find_nearest_target_pos(&self, world: &World, drone: &Drone) -> Option<Vec2> {
-        let other_drone = world.me.drones.values().find(|d| d.id != drone.id).unwrap();
-        if let Some(target) = world
-            .creatures
-            .values()
-            .filter(|c| {
-                !world.me.scans.contains(&c.id)
-                    && !self.is_in_someone_scan(c.id, world)
-                    && self.is_alive(c.id, world)
-                    && c.typ != -1
-            })
-            .min_by_key(|c| {
-                let bounds_center = self.bounds_detector.get_bounds(c.id).get_center();
-                let dist_to_center = (bounds_center - drone.pos).len();
-                let dist_to_other_drone = (bounds_center - other_drone.pos).len();
-                (dist_to_center - (dist_to_other_drone / 3.)) as i32
-            })
-        {
-            let bounds = self.bounds_detector.get_bounds(target.id);
-            eprintln!("Moving to target {} with bounds: {:#?}", target.id, bounds);
-            Some(bounds.get_center())
-        } else {
-            for c in world.creatures.values() {
-                if world.me.scans.contains(&c.id) {
-                    eprintln!("{} is in my scans...", c.id);
-                    continue;
-                }
-                if self.is_in_someone_scan(c.id, world) {
-                    eprintln!("{} is in drone scans...", c.id);
-                    continue;
-                }
-                if c.typ == -1 {
-                    eprintln!("{} is a monster...", c.id);
-                    continue;
-                }
-                eprintln!("{} is OK!!", c.id);
-            }
-            None
-        }
-    }
-    fn get_total_live_fishes_count(world: &World) -> i32 {
-        world
-            .me
-            .drones
-            .values()
-            .flat_map(|d| &d.blips)
-            .map(|(&id, _)| id)
-            .filter(|&id| !world.me.scans.contains(&id))
-            .collect::<HashSet<i32>>()
-            .len() as i32
-    }
-    fn get_total_scaned_fishes_count(world: &World) -> i32 {
-        world
-            .me
-            .drones
-            .values()
-            .flat_map(|d| &d.scans)
-            .copied()
-            .collect::<HashSet<i32>>()
-            .len() as i32
-    }
-    fn find_monster_nearby(&self, drone: &Drone) -> Option<Vec2> {
-        self.tracker
-            .monsters
-            .values()
-            .map(|m| m.pos)
-            .min_by_key(|&pos| (pos - drone.pos).len() as i32)
-    }
     pub fn play(&mut self, world: &World) {
         self.tracker.update(world);
         self.bounds_detector.update(world);
         self.exploration_map.update(world);
         self.score_map.update(world, &self.bounds_detector);
-        let mut pathfinding =
-            Pathfinding::new(&self.tracker, &self.exploration_map, &self.score_map);
-        let actions = pathfinding.search(world);
+        let actions =
+            self.pathfinding
+                .search(world, &self.tracker, &self.exploration_map, &self.score_map);
         for (i, drone) in world.me.drones.values().enumerate() {
             let action = actions[i];
             let pos = drone.pos + action.get_move();
@@ -882,7 +830,16 @@ macro_rules! parse_input {
         $x.trim().parse::<$t>().unwrap()
     };
 }
+#[cfg(debug_assertions)]
+fn check_debug() {
+    eprintln!("Debugging enabled");
+}
+#[cfg(not(debug_assertions))]
+fn check_debug() {
+    eprintln!("Debugging disabled");
+}
 fn main() {
+    check_debug();
     let mut input_line = String::new();
     io::stdin().read_line(&mut input_line).unwrap();
     let creature_count = parse_input!(input_line, usize);

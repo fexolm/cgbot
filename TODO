@@ -4,6 +4,13 @@ Maps:
 
 PathPlanning:
     Genetic algorithm:
-        ☐ Action
-        ☐ Simulation
-        ☐ Score
+        ✔ Action @done(23-12-21 00:42)
+        ✔ Simulation @done(23-12-21 00:42)
+        ✔ Score @done(23-12-21 00:42)
+
+Heuristics Tuning:
+    ☐ Penalty for having many scans at the bottom of the map
+
+Visualizer:
+    ☐ Serialize game state to string
+    ☐ Draw picture from string
