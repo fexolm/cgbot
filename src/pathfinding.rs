@@ -32,7 +32,7 @@ struct DroneState {
 #[derive(Clone)]
 struct GameState {
     drones: [DroneState; 2],
-    visited: [[bool; S_CELLS]; 20],
+    visited: [[bool; S_CELLS]; S_CELLS],
     score: f32,
 }
 
@@ -116,7 +116,7 @@ impl GameState {
     }
 }
 
-const GENE_SIZE: usize = 25;
+const GENE_SIZE: usize = 30;
 const POPULATION_SIZE: usize = 30;
 const MUTATIONS_SIZE: usize = 30;
 const MUTATIONS_COUNT: usize = 3;
@@ -131,7 +131,7 @@ struct Simulation<'a> {
 }
 
 pub struct Pathfinding {
-    population: Vec<(f32, Gene)>,
+    pub population: Vec<(f32, Gene)>,
 }
 
 impl Pathfinding {

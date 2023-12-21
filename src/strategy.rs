@@ -1,11 +1,11 @@
 use super::*;
 
 pub struct Strategy {
-    bounds_detector: BoundsDetector,
+    pub bounds_detector: BoundsDetector,
     tracker: Tracker,
-    exploration_map: ExplorationMap,
-    score_map: ScoreMap,
-    pathfinding: Pathfinding,
+    pub exploration_map: ExplorationMap,
+    pub score_map: ScoreMap,
+    pub pathfinding: Pathfinding,
 }
 
 impl Strategy {

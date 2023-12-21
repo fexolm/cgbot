@@ -12,5 +12,5 @@ Heuristics Tuning:
     ☐ Penalty for having many scans at the bottom of the map
 
 Visualizer:
-    ☐ Serialize game state to string
-    ☐ Draw picture from string
+    ✔ Local simulation @done(23-12-22 01:09)
+    ✔ Picture @done(23-12-22 01:09)

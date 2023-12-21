@@ -37,7 +37,7 @@ impl Bounds {
 }
 
 pub struct BoundsDetector {
-    bounds: HashMap<i32, Bounds>,
+    pub bounds: HashMap<i32, Bounds>,
 }
 
 fn get_bounds_for_type(typ: i8) -> Bounds {

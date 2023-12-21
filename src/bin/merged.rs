@@ -31,7 +31,7 @@ impl Bounds {
     }
 }
 pub struct BoundsDetector {
-    bounds: HashMap<i32, Bounds>,
+    pub bounds: HashMap<i32, Bounds>,
 }
 fn get_bounds_for_type(typ: i8) -> Bounds {
     match typ {
@@ -271,7 +271,7 @@ struct DroneState {
 #[derive(Clone)]
 struct GameState {
     drones: [DroneState; 2],
-    visited: [[bool; S_CELLS]; 20],
+    visited: [[bool; S_CELLS]; S_CELLS],
     score: f32,
 }
 fn estimate_drones_scans_profit(world: &World, drone: &Drone, state: &mut DroneState) {
@@ -342,7 +342,7 @@ impl GameState {
         }
     }
 }
-const GENE_SIZE: usize = 25;
+const GENE_SIZE: usize = 30;
 const POPULATION_SIZE: usize = 30;
 const MUTATIONS_SIZE: usize = 30;
 const MUTATIONS_COUNT: usize = 3;
@@ -355,7 +355,7 @@ struct Simulation<'a> {
     score_map: &'a ScoreMap,
 }
 pub struct Pathfinding {
-    population: Vec<(f32, Gene)>,
+    pub population: Vec<(f32, Gene)>,
 }
 impl Pathfinding {
     pub fn new() -> Self {
@@ -573,11 +573,11 @@ impl<'a> Simulation<'a> {
 pub mod strategy {
 use super::*;
 pub struct Strategy {
-    bounds_detector: BoundsDetector,
+    pub bounds_detector: BoundsDetector,
     tracker: Tracker,
-    exploration_map: ExplorationMap,
-    score_map: ScoreMap,
-    pathfinding: Pathfinding,
+    pub exploration_map: ExplorationMap,
+    pub score_map: ScoreMap,
+    pub pathfinding: Pathfinding,
 }
 impl Strategy {
     pub fn new() -> Self {
@@ -738,6 +738,17 @@ pub struct Creature {
     pub pos: Option<Vec2>,
     pub speed: Option<Vec2>,
 }
+impl Creature {
+    pub fn new(id: i32, color: i8, typ: i8, pos: Option<Vec2>, speed: Option<Vec2>) -> Self {
+        Creature {
+            id,
+            color,
+            typ,
+            pos,
+            speed,
+        }
+    }
+}
 #[derive(Clone, Copy)]
 pub enum BlipDirection {
     TL,
@@ -777,7 +788,7 @@ impl Creature {
         self.speed = None;
     }
 }
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct Drone {
     pub id: i32,
     pub pos: Vec2,

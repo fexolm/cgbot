@@ -8,6 +8,10 @@ build = "build.rs"
 
 [dependencies]
 rand = "0.8.5"
+flo_draw = "0.3.1"
+flo_canvas = "0.3.1"
+futures = "0.3"
+
 
 [build-dependencies]
 rustsourcebundler = { git = "https://github.com/lpenz/rust-sourcebundler" }

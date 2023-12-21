@@ -14,6 +14,18 @@ pub struct Creature {
     pub speed: Option<Vec2>,
 }
 
+impl Creature {
+    pub fn new(id: i32, color: i8, typ: i8, pos: Option<Vec2>, speed: Option<Vec2>) -> Self {
+        Creature {
+            id,
+            color,
+            typ,
+            pos,
+            speed,
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub enum BlipDirection {
     TL,
@@ -58,7 +70,7 @@ impl Creature {
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct Drone {
     pub id: i32,
     pub pos: Vec2,
