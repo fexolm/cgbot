@@ -342,7 +342,7 @@ impl GameState {
         }
     }
 }
-const GENE_SIZE: usize = 30;
+const GENE_SIZE: usize = 25;
 const POPULATION_SIZE: usize = 30;
 const MUTATIONS_SIZE: usize = 30;
 const MUTATIONS_COUNT: usize = 3;
