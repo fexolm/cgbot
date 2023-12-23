@@ -59,9 +59,12 @@ fn main() {
 
     let mut strategy = Strategy::new();
 
+    let mut iter = 0;
     // game loop
     loop {
         world.clear();
+        world.iter = iter;
+
         let mut input_line = String::new();
         io::stdin().read_line(&mut input_line).unwrap();
         world.me.score = parse_input!(input_line, i32);
@@ -212,5 +215,6 @@ fn main() {
         }
 
         strategy.play(&world);
+        iter += 1;
     }
 }

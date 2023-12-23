@@ -268,11 +268,27 @@ struct DroneState {
     base_scans_cost: i32,
     urgent_scans_cost: i32,
 }
+#[derive(Clone, Copy, Default)]
+pub struct Score {
+    saving_scans_score: f32,
+    saving_urgent_scans_score: f32,
+    exploration_score: f32,
+    dead_score: f32,
+}
+impl Score {
+    fn value(&self) -> f32 {
+        self.saving_scans_score
+            + self.saving_urgent_scans_score
+            + self.exploration_score
+            + self.dead_score
+    }
+}
 #[derive(Clone)]
 struct GameState {
     drones: [DroneState; 2],
     visited: [[bool; S_CELLS]; S_CELLS],
-    score: f32,
+    score: Score,
+    iter: i32,
 }
 fn estimate_drones_scans_profit(world: &World, drone: &Drone, state: &mut DroneState) {
     let mut by_typ_count = [0; 3];
@@ -330,16 +346,19 @@ impl GameState {
         GameState {
             drones,
             visited,
-            score: 0.,
+            score: Score::default(),
+            iter: world.iter,
         }
     }
-    fn visit_cell(&mut self, x: usize, y: usize, score: f32) {
+    fn visit_score(&self, x: usize, y: usize) -> f32 {
         if !self.visited[x][y] {
-            self.visited[x][y] = true;
-            self.score += score
+            1.
         } else {
-            self.score += score / 20.;
+            1. / 100.
         }
+    }
+    fn visit_cell(&mut self, x: usize, y: usize) {
+        self.visited[x][y] = true;
     }
 }
 const GENE_SIZE: usize = 25;
@@ -347,7 +366,7 @@ const POPULATION_SIZE: usize = 30;
 const MUTATIONS_SIZE: usize = 30;
 const MUTATIONS_COUNT: usize = 3;
 const RANDOM_SIZE: usize = 10;
-const CROSSOVER_SIZE: usize = 20;
+const CROSSOVER_SIZE: usize = 30;
 type Gene = [[Action; 2]; GENE_SIZE];
 struct Simulation<'a> {
     tracker: &'a Tracker,
@@ -355,7 +374,7 @@ struct Simulation<'a> {
     score_map: &'a ScoreMap,
 }
 pub struct Pathfinding {
-    pub population: Vec<(f32, Gene)>,
+    pub population: Vec<(Score, Gene)>,
 }
 impl Pathfinding {
     pub fn new() -> Self {
@@ -378,10 +397,26 @@ impl Pathfinding {
         for actions in &mut gene {
             for action in actions {
                 action.angle = rng.gen_range(-PI..PI);
-                action.light = rng.gen_bool(0.5);
+                action.light = false;
             }
         }
         gene
+    }
+    fn straight_top_gene(&self) -> Gene {
+        let mut gene = Gene::default();
+        for actions in &mut gene {
+            for action in actions {
+                action.angle = -PI / 2.;
+                action.light = false;
+            }
+        }
+        gene
+    }
+    fn add_straight_top(&mut self, simulation: &Simulation, state_proto: &GameState) {
+        let mut gene = self.straight_top_gene();
+        let mut state = state_proto.clone();
+        simulation.simulate_all(&mut state, &mut gene);
+        self.population.push((state.score, gene));
     }
     fn mutation(&mut self, simulation: &Simulation, state_proto: &GameState) {
         let mut rng = rand::thread_rng();
@@ -394,7 +429,7 @@ impl Pathfinding {
                 new_gene[mut_idx] = self.random_actions();
             }
             let mut state = state_proto.clone();
-            simulation.simulate_all(&mut state, &new_gene);
+            simulation.simulate_all(&mut state, &mut new_gene);
             self.population.push((state.score, new_gene));
         }
     }
@@ -411,39 +446,29 @@ impl Pathfinding {
             let (_, gene2) = &self.population[idx2];
             let mut new_gene1 = gene1.clone();
             let mut new_gene2 = gene2.clone();
-            let mut new_gene11 = gene1.clone();
-            let mut new_gene22 = gene2.clone();
             for i in 0..gene1.len() {
-                new_gene1[i][0] = gene2[i][0];
-                new_gene11[i][0] = gene2[i][1];
-                new_gene2[i][0] = gene1[i][0];
-                new_gene22[i][1] = gene1[i][1];
+                new_gene1[i][1] = gene2[i][1];
+                new_gene2[i][1] = gene1[i][1];
             }
             let mut state = state_proto.clone();
-            simulation.simulate_all(&mut state, &new_gene1);
+            simulation.simulate_all(&mut state, &mut new_gene1);
             self.population.push((state.score, new_gene1));
             let mut state = state_proto.clone();
-            simulation.simulate_all(&mut state, &new_gene2);
+            simulation.simulate_all(&mut state, &mut new_gene2);
             self.population.push((state.score, new_gene2));
-            let mut state = state_proto.clone();
-            simulation.simulate_all(&mut state, &new_gene11);
-            self.population.push((state.score, new_gene11));
-            let mut state = state_proto.clone();
-            simulation.simulate_all(&mut state, &new_gene22);
-            self.population.push((state.score, new_gene22));
         }
     }
     fn add_randoms(&mut self, simulation: &Simulation, state_proto: &GameState) {
         for _ in 0..RANDOM_SIZE {
-            let gene = self.random_gene();
+            let mut gene = self.random_gene();
             let mut state = state_proto.clone();
-            simulation.simulate_all(&mut state, &gene);
+            simulation.simulate_all(&mut state, &mut gene);
             self.population.push((state.score, gene));
         }
     }
     fn selection(&mut self) {
         self.population
-            .sort_by_key(|(score, _)| -(score * 100.) as i32);
+            .sort_by_key(|(score, _)| -(score.value() * 100.) as i32);
         self.population.truncate(POPULATION_SIZE);
     }
     fn modify_prev_generation(&mut self, simulation: &Simulation, state_proto: &GameState) {
@@ -456,7 +481,7 @@ impl Pathfinding {
             }
             gene[gene.len() - 1] = self.random_actions();
             let mut state = state_proto.clone();
-            simulation.simulate_all(&mut state, &gene);
+            simulation.simulate_all(&mut state, &mut gene);
             self.population.push((state.score, gene));
         }
     }
@@ -471,29 +496,31 @@ impl Pathfinding {
         let state_proto = GameState::new(world);
         let simulation = Simulation::new(tracker, exploration_map, score_map);
         self.modify_prev_generation(&simulation, &state_proto);
+        self.add_straight_top(&simulation, &state_proto);
         for _ in 0..POPULATION_SIZE {
-            let gene = self.random_gene();
+            let mut gene = self.random_gene();
             let mut state = state_proto.clone();
-            simulation.simulate_all(&mut state, &gene);
+            simulation.simulate_all(&mut state, &mut gene);
             self.population.push((state.score, gene));
         }
         let mut iter = 0;
         while Instant::now().duration_since(start).as_millis() < 40 {
             iter += 1;
-            if iter % 5 == 0 {
-                self.crossover(&simulation, &state_proto);
-            }
             self.add_randoms(&simulation, &state_proto);
             self.mutation(&simulation, &state_proto);
+            self.crossover(&simulation, &state_proto);
             self.selection();
         }
         let (best_score, best_actions) = self.population[0];
         eprintln!("Iterations count: {iter}");
-        eprintln!("Best score: {best_score}");
-        let esum: f32 = simulation.exploration_map.map.iter().flatten().sum();
-        let ssum: f32 = simulation.score_map.map.iter().flatten().sum();
-        eprintln!("esum: {esum}");
-        eprintln!("ssum: {ssum}");
+        eprintln!("Best score: {}", best_score.value());
+        eprintln!("Exploration score: {}", best_score.exploration_score);
+        eprintln!("Saving scans score: {}", best_score.saving_scans_score);
+        eprintln!(
+            "Saving urgent scans score: {}",
+            best_score.saving_urgent_scans_score
+        );
+        eprintln!("Dead score: {}", best_score.dead_score);
         best_actions[0]
     }
 }
@@ -509,64 +536,100 @@ impl<'a> Simulation<'a> {
             score_map,
         }
     }
-    fn simulate(&self, state: &mut GameState, actions: &[Action; 2], iter: usize) {
+    fn simulate(&self, state: &mut GameState, actions: &mut [Action; 2], iter: usize) {
         for i in 0..2 {
-            let drone = &mut state.drones[i];
-            if drone.dead {
-                state.score -= 1000.;
-                continue;
+            let action = &mut actions[i];
+            {
+                let drone = &state.drones[i];
+                if drone.dead {
+                    state.score.dead_score -= 1000.;
+                    continue;
+                }
+                let dir = Vec2::new(1., 0.).rotate(action.angle);
+                let mov = dir * 300.;
+                for _ in 0..2 {
+                    let drone = &mut state.drones[i];
+                    drone.pos = (drone.pos + mov).clamp(Vec2::new(0., 0.), Vec2::new(9999., 9999.));
+                    let (x, y) = position_to_grid_cell(drone.pos, S_CELL_SIZE);
+                    state.score.exploration_score += self.exploration_map.get_score_by_idx(x, y)
+                        * self.score_map.get_score_by_idx(x, y)
+                        * state.visit_score(x, y);
+                    state.visit_cell(x, y);
+                }
             }
-            let action = &actions[i];
-            let dir = Vec2::new(1., 0.).rotate(action.angle);
-            let mov = dir * 600.;
-            drone.pos = (drone.pos + mov).clamp(Vec2::new(0., 0.), Vec2::new(9999., 9999.));
-            if action.light && drone.bat >= 5 {
-                drone.bat -= 5;
+            {
+                let drone = &mut state.drones[i];
+                if drone.pos.y < 400. {
+                    let iter = iter as f32;
+                    state.score.saving_scans_score += (drone.base_scans_cost) as f32 / iter;
+                    state.score.saving_urgent_scans_score +=
+                        (drone.urgent_scans_cost * drone.urgent_scans_cost) as f32 / iter / iter;
+                    drone.base_scans_cost = 0;
+                    drone.urgent_scans_cost = 0;
+                }
+                drone.dead = self
+                    .tracker
+                    .monsters
+                    .values()
+                    .any(|m| (m.pos - drone.pos).len() < 1200.);
+                if drone.dead {
+                    continue;
+                }
             }
-            let iter = iter as f32;
-            if drone.pos.y < 400. {
-                state.score += (drone.base_scans_cost) as f32 / iter;
-                state.score +=
-                    (drone.urgent_scans_cost * drone.urgent_scans_cost) as f32 / iter / iter;
-                drone.base_scans_cost = 0;
-                drone.urgent_scans_cost = 0;
-            }
-            drone.dead = self
-                .tracker
-                .monsters
-                .values()
-                .any(|m| (m.pos - drone.pos).len() < 1200.);
+            let drone = &state.drones[i];
             let (x, y) = position_to_grid_cell(drone.pos, S_CELL_SIZE);
-            state.visit_cell(
-                x,
-                y,
-                self.exploration_map.get_score_by_idx(x, y) * self.score_map.get_score_by_idx(x, y),
-            );
             let (x, y) = (x as i32, y as i32);
-            for dx in -1..2 {
-                for dy in -1..2 {
-                    if x + dx >= 0
-                        && x + dx < S_CELLS as i32
-                        && y + dy >= 0
-                        && y + dy < S_CELLS as i32
-                    {
-                        let (x, y) = ((x + dx) as usize, (y + dy) as usize);
-                        state.visit_cell(
-                            x,
-                            y,
-                            self.exploration_map.get_score_by_idx(x, y)
-                                * self.score_map.get_score_by_idx(x, y),
-                        )
+            let mut light_score = 0.;
+            if (state.iter + iter as i32) % 5 == 0 && drone.bat >= 5 {
+                for dx in -1..2 {
+                    for dy in -1..2 {
+                        if x + dx >= 0
+                            && x + dx < S_CELLS as i32
+                            && y + dy >= 0
+                            && y + dy < S_CELLS as i32
+                        {
+                            let (x, y) = ((x + dx) as usize, (y + dy) as usize);
+                            light_score += self.exploration_map.get_score_by_idx(x, y)
+                                * self.score_map.get_score_by_idx(x, y)
+                                * state.visit_score(x, y);
+                        }
                     }
                 }
+                if light_score > 0. {
+                    action.light = true;
+                } else {
+                    action.light = false;
+                }
+            } else {
+                action.light = false;
+            }
+            if action.light {
+                for dx in -1..2 {
+                    for dy in -1..2 {
+                        if x + dx >= 0
+                            && x + dx < S_CELLS as i32
+                            && y + dy >= 0
+                            && y + dy < S_CELLS as i32
+                        {
+                            let (x, y) = ((x + dx) as usize, (y + dy) as usize);
+                            state.visit_cell(x, y);
+                        }
+                    }
+                }
+                state.score.exploration_score += light_score;
+            }
+            let drone = &mut state.drones[i];
+            if action.light {
+                drone.bat -= 5;
+            } else {
+                drone.bat += 1;
             }
         }
     }
-    fn simulate_all(&self, state: &mut GameState, gene: &Gene) {
-        for (iter, action) in gene.iter().enumerate() {
+    fn simulate_all(&self, state: &mut GameState, gene: &mut Gene) {
+        for (iter, action) in gene.iter_mut().enumerate() {
             self.simulate(state, action, iter + 1);
         }
-        state.score += (state.drones[0].bat + state.drones[1].bat) as f32 / 30.
     }
 }
 }
@@ -814,6 +877,7 @@ pub struct World {
     pub creatures: HashMap<i32, Creature>,
     pub me: Player,
     pub opponent: Player,
+    pub iter: i32,
 }
 impl World {
     pub fn clear(&mut self) {
@@ -877,8 +941,10 @@ fn main() {
         ..Default::default()
     };
     let mut strategy = Strategy::new();
+    let mut iter = 0;
     loop {
         world.clear();
+        world.iter = iter;
         let mut input_line = String::new();
         io::stdin().read_line(&mut input_line).unwrap();
         world.me.score = parse_input!(input_line, i32);
@@ -1006,5 +1072,6 @@ fn main() {
             input_line.clear();
         }
         strategy.play(&world);
+        iter += 1;
     }
 }

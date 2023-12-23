@@ -99,6 +99,7 @@ pub struct World {
     pub creatures: HashMap<i32, Creature>,
     pub me: Player,
     pub opponent: Player,
+    pub iter: i32,
 }
 
 impl World {

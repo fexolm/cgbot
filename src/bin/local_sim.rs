@@ -67,6 +67,7 @@ impl SimWorld {
             let y = rng.gen_range(0..10000);
 
             let mut blips = HashMap::new();
+            let mut scans = HashSet::new();
 
             for i in 0..15 {
                 let (creature, _) = &creatures[i];
@@ -81,6 +82,10 @@ impl SimWorld {
                     (false, false) => BlipDirection::BR,
                 };
 
+                if creature.typ != -1 && rng.gen_bool(0.1) {
+                    scans.insert(creature.id);
+                }
+
                 blips.insert(creature.id, dir);
             }
 
@@ -90,7 +95,7 @@ impl SimWorld {
                 bat: 30,
                 emergency: 0,
                 blips,
-                scans: HashSet::new(),
+                scans,
             };
             drones.push(drone);
         }
@@ -120,12 +125,21 @@ impl SimWorld {
         me.drones = self.drones.iter().map(|d| (d.id, d.clone())).collect();
 
         let mut opponent = Player::default();
-        opponent.drones = self.drones.iter().map(|d| (d.id, d.clone())).collect();
+        opponent.drones = self
+            .drones
+            .iter()
+            .map(|d| {
+                let mut drone = d.clone();
+                drone.scans.clear();
+                (d.id + 100, drone)
+            })
+            .collect();
 
         World {
             creatures,
             me,
             opponent,
+            iter: 0,
         }
     }
 }
@@ -179,9 +193,8 @@ fn draw_world(gc: &mut CanvasGraphicsContext, world: &SimWorld) {
         draw_circle_at_pos(gc, pos, color);
     }
 
-    for d in &world.drones {
-        draw_circle_at_pos(gc, d.pos, Color::Rgba(0., 0., 1., 1.));
-    }
+    draw_circle_at_pos(gc, world.drones[0].pos, Color::Rgba(0., 0., 1., 1.));
+    draw_circle_at_pos(gc, world.drones[1].pos, Color::Rgba(1., 0., 1., 1.));
 }
 
 fn draw_lines(gc: &mut CanvasGraphicsContext) {
@@ -260,7 +273,7 @@ fn draw_paths(
                 0.0,
                 (drone_idx % 2) as f32,
                 ((drone_idx + 1) % 2) as f32,
-                if i == 0 { 1. } else { 0.05 },
+                if i == 0 { 1. } else { 0.1 },
             ));
             gc.stroke();
         }
