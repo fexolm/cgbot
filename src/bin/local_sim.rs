@@ -81,7 +81,7 @@ impl SimWorld {
                     (false, false) => BlipDirection::BR,
                 };
 
-                if creature.typ != -1 && rng.gen_bool(0.1) {
+                if creature.typ != -1 && rng.gen_bool(1.) {
                     scans.insert(creature.id);
                 }
 

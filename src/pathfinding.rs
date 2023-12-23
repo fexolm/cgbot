@@ -34,6 +34,7 @@ pub struct Score {
     saving_scans_score: f32,
     saving_urgent_scans_score: f32,
     exploration_score: f32,
+    ascent_score: f32,
     dead_score: f32,
 }
 
@@ -43,6 +44,7 @@ impl Score {
             + self.saving_urgent_scans_score
             + self.exploration_score
             + self.dead_score
+            + self.ascent_score
     }
 }
 
@@ -345,6 +347,7 @@ impl Pathfinding {
             "Saving urgent scans score: {}",
             best_score.saving_urgent_scans_score
         );
+        eprintln!("Ascent score: {}", best_score.ascent_score);
         eprintln!("Dead score: {}", best_score.dead_score);
         eprintln!("Dead simulations: {}", simulation.dead_simulations);
         eprintln!("Total simulations: {}", simulation.total_simulations);
@@ -423,7 +426,8 @@ impl<'a> Simulation<'a> {
 
                 state.score.exploration_score += self.exploration_map.get_score_by_idx(x, y)
                     * self.score_map.get_score_by_idx(x, y)
-                    * state.visit_score(x, y);
+                    * state.visit_score(x, y)
+                    / (iter as f32).sqrt();
                 state.visit_cell(x, y);
             }
 
@@ -485,7 +489,7 @@ impl<'a> Simulation<'a> {
                     }
                 }
 
-                state.score.exploration_score += light_score;
+                state.score.exploration_score += light_score / (iter as f32).sqrt();
             }
 
             let drone = &mut state.drones[i];
@@ -502,6 +506,12 @@ impl<'a> Simulation<'a> {
         for (iter, action) in gene.iter_mut().enumerate() {
             self.simulate(state, action, iter + 1);
         }
+
+        state.score.ascent_score +=
+            state.drones[0].base_scans_cost as f32 * (1. - state.drones[0].pos.y / 10000.) / 5.;
+
+        state.score.ascent_score +=
+            state.drones[1].base_scans_cost as f32 * (1. - state.drones[1].pos.y / 10000.) / 5.;
 
         self.total_simulations += 1;
 
