@@ -2,7 +2,6 @@ extern crate cgbot;
 
 use std::collections::{HashMap, HashSet};
 
-use canvas::curves::Bounds;
 use cgbot::*;
 
 use flo_canvas::*;

@@ -372,6 +372,8 @@ struct Simulation<'a> {
     tracker: &'a Tracker,
     exploration_map: &'a ExplorationMap,
     score_map: &'a ScoreMap,
+    dead_simulations: i32,
+    total_simulations: i32,
 }
 pub struct Pathfinding {
     pub population: Vec<(Score, Gene)>,
@@ -412,13 +414,13 @@ impl Pathfinding {
         }
         gene
     }
-    fn add_straight_top(&mut self, simulation: &Simulation, state_proto: &GameState) {
+    fn add_straight_top(&mut self, simulation: &mut Simulation, state_proto: &GameState) {
         let mut gene = self.straight_top_gene();
         let mut state = state_proto.clone();
         simulation.simulate_all(&mut state, &mut gene);
         self.population.push((state.score, gene));
     }
-    fn mutation(&mut self, simulation: &Simulation, state_proto: &GameState) {
+    fn mutation(&mut self, simulation: &mut Simulation, state_proto: &GameState) {
         let mut rng = rand::thread_rng();
         let population_size = self.population.len();
         for _ in 0..MUTATIONS_SIZE {
@@ -433,7 +435,7 @@ impl Pathfinding {
             self.population.push((state.score, new_gene));
         }
     }
-    fn crossover(&mut self, simulation: &Simulation, state_proto: &GameState) {
+    fn crossover(&mut self, simulation: &mut Simulation, state_proto: &GameState) {
         let mut rng = rand::thread_rng();
         let population_size = self.population.len();
         for _ in 0..CROSSOVER_SIZE {
@@ -458,7 +460,7 @@ impl Pathfinding {
             self.population.push((state.score, new_gene2));
         }
     }
-    fn add_randoms(&mut self, simulation: &Simulation, state_proto: &GameState) {
+    fn add_randoms(&mut self, simulation: &mut Simulation, state_proto: &GameState) {
         for _ in 0..RANDOM_SIZE {
             let mut gene = self.random_gene();
             let mut state = state_proto.clone();
@@ -471,7 +473,7 @@ impl Pathfinding {
             .sort_by_key(|(score, _)| -(score.value() * 100.) as i32);
         self.population.truncate(POPULATION_SIZE);
     }
-    fn modify_prev_generation(&mut self, simulation: &Simulation, state_proto: &GameState) {
+    fn modify_prev_generation(&mut self, simulation: &mut Simulation, state_proto: &GameState) {
         let mut old_population = self.population.clone();
         self.population.clear();
         for (_, action) in &mut old_population {
@@ -494,9 +496,9 @@ impl Pathfinding {
     ) -> [Action; 2] {
         let start = Instant::now();
         let state_proto = GameState::new(world);
-        let simulation = Simulation::new(tracker, exploration_map, score_map);
-        self.modify_prev_generation(&simulation, &state_proto);
-        self.add_straight_top(&simulation, &state_proto);
+        let mut simulation = Simulation::new(tracker, exploration_map, score_map);
+        self.modify_prev_generation(&mut simulation, &state_proto);
+        self.add_straight_top(&mut simulation, &state_proto);
         for _ in 0..POPULATION_SIZE {
             let mut gene = self.random_gene();
             let mut state = state_proto.clone();
@@ -506,9 +508,9 @@ impl Pathfinding {
         let mut iter = 0;
         while Instant::now().duration_since(start).as_millis() < 40 {
             iter += 1;
-            self.add_randoms(&simulation, &state_proto);
-            self.mutation(&simulation, &state_proto);
-            self.crossover(&simulation, &state_proto);
+            self.add_randoms(&mut simulation, &state_proto);
+            self.mutation(&mut simulation, &state_proto);
+            self.crossover(&mut simulation, &state_proto);
             self.selection();
         }
         let (best_score, best_actions) = self.population[0];
@@ -521,6 +523,8 @@ impl Pathfinding {
             best_score.saving_urgent_scans_score
         );
         eprintln!("Dead score: {}", best_score.dead_score);
+        eprintln!("Dead simulations: {}", simulation.dead_simulations);
+        eprintln!("Total simulations: {}", simulation.total_simulations);
         best_actions[0]
     }
 }
@@ -534,53 +538,68 @@ impl<'a> Simulation<'a> {
             tracker,
             exploration_map,
             score_map,
+            dead_simulations: 0,
+            total_simulations: 0,
         }
     }
-    fn simulate(&self, state: &mut GameState, actions: &mut [Action; 2], iter: usize) {
+    fn adjust_drone_move(&self, state: &mut GameState, drone_idx: usize, action: &mut Action) {
+        let drone = &mut state.drones[drone_idx];
+        let base_angle = action.angle;
+        for rotation in [(-PI / 3.), (PI / 3.), (2. * PI / 3.), (-2. * PI / 3.)] {
+            let dir = Vec2::new(1., 0.).rotate(action.angle);
+            let mov = dir * 600.;
+            let new_pos = (drone.pos + mov).clamp(Vec2::new(0., 0.), Vec2::new(9999., 9999.));
+            drone.dead = self
+                .tracker
+                .monsters
+                .values()
+                .any(|m| (m.pos - new_pos).len() < 1200.);
+            if !drone.dead {
+                return;
+            }
+            action.angle = base_angle + rotation;
+            if action.angle > PI {
+                action.angle -= 2. * PI;
+            }
+        }
+    }
+    fn simulate(&mut self, state: &mut GameState, actions: &mut [Action; 2], iter: usize) {
         for i in 0..2 {
             let action = &mut actions[i];
-            {
-                let drone = &state.drones[i];
-                if drone.dead {
-                    state.score.dead_score -= 1000.;
-                    continue;
-                }
-                let dir = Vec2::new(1., 0.).rotate(action.angle);
-                let mov = dir * 300.;
-                for _ in 0..2 {
-                    let drone = &mut state.drones[i];
-                    drone.pos = (drone.pos + mov).clamp(Vec2::new(0., 0.), Vec2::new(9999., 9999.));
-                    let (x, y) = position_to_grid_cell(drone.pos, S_CELL_SIZE);
-                    state.score.exploration_score += self.exploration_map.get_score_by_idx(x, y)
-                        * self.score_map.get_score_by_idx(x, y)
-                        * state.visit_score(x, y);
-                    state.visit_cell(x, y);
-                }
+            if state.drones[i].dead {
+                state.score.dead_score -= 1000.;
+                continue;
             }
-            {
+            self.adjust_drone_move(state, i, action);
+            if state.drones[i].dead {
+                state.score.dead_score -= 1000.;
+                continue;
+            }
+            let dir = Vec2::new(1., 0.).rotate(action.angle);
+            let mov = dir * 300.;
+            for _ in 0..2 {
                 let drone = &mut state.drones[i];
-                if drone.pos.y < 400. {
-                    let iter = iter as f32;
-                    state.score.saving_scans_score += (drone.base_scans_cost) as f32 / iter;
-                    state.score.saving_urgent_scans_score +=
-                        (drone.urgent_scans_cost * drone.urgent_scans_cost) as f32 / iter / iter;
-                    drone.base_scans_cost = 0;
-                    drone.urgent_scans_cost = 0;
-                }
-                drone.dead = self
-                    .tracker
-                    .monsters
-                    .values()
-                    .any(|m| (m.pos - drone.pos).len() < 1200.);
-                if drone.dead {
-                    continue;
-                }
+                drone.pos = (drone.pos + mov).clamp(Vec2::new(0., 0.), Vec2::new(9999., 9999.));
+                let (x, y) = position_to_grid_cell(drone.pos, S_CELL_SIZE);
+                state.score.exploration_score += self.exploration_map.get_score_by_idx(x, y)
+                    * self.score_map.get_score_by_idx(x, y)
+                    * state.visit_score(x, y);
+                state.visit_cell(x, y);
+            }
+            let drone = &mut state.drones[i];
+            if drone.pos.y < 400. {
+                let iter = iter as f32;
+                state.score.saving_scans_score += (drone.base_scans_cost) as f32 / iter;
+                state.score.saving_urgent_scans_score +=
+                    (drone.urgent_scans_cost * drone.urgent_scans_cost) as f32 / iter / iter;
+                drone.base_scans_cost = 0;
+                drone.urgent_scans_cost = 0;
             }
             let drone = &state.drones[i];
             let (x, y) = position_to_grid_cell(drone.pos, S_CELL_SIZE);
             let (x, y) = (x as i32, y as i32);
             let mut light_score = 0.;
-            if (state.iter + iter as i32) % 5 == 0 && drone.bat >= 5 {
+            if drone.bat >= 5 {
                 for dx in -1..2 {
                     for dy in -1..2 {
                         if x + dx >= 0
@@ -595,7 +614,7 @@ impl<'a> Simulation<'a> {
                         }
                     }
                 }
-                if light_score > 0. {
+                if light_score > 0.5 {
                     action.light = true;
                 } else {
                     action.light = false;
@@ -626,9 +645,13 @@ impl<'a> Simulation<'a> {
             }
         }
     }
-    fn simulate_all(&self, state: &mut GameState, gene: &mut Gene) {
+    fn simulate_all(&mut self, state: &mut GameState, gene: &mut Gene) {
         for (iter, action) in gene.iter_mut().enumerate() {
             self.simulate(state, action, iter + 1);
+        }
+        self.total_simulations += 1;
+        if state.drones[0].dead || state.drones[1].dead {
+            self.dead_simulations += 1;
         }
     }
 }
