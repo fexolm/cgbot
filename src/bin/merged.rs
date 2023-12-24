@@ -303,6 +303,7 @@ pub struct Score {
     saving_urgent_scans_score: f32,
     exploration_score: f32,
     ascent_score: f32,
+    dive_score: f32,
     dead_score: f32,
 }
 impl Score {
@@ -312,6 +313,7 @@ impl Score {
             + self.exploration_score
             + self.dead_score
             + self.ascent_score
+            + self.dive_score
     }
 }
 #[derive(Clone)]
@@ -554,6 +556,7 @@ impl Pathfinding {
             best_score.saving_urgent_scans_score
         );
         eprintln!("Ascent score: {}", best_score.ascent_score);
+        eprintln!("Dive score: {}", best_score.dive_score);
         eprintln!("Dead score: {}", best_score.dead_score);
         eprintln!("Dead simulations: {}", simulation.dead_simulations);
         eprintln!("Total simulations: {}", simulation.total_simulations);
@@ -574,10 +577,53 @@ impl<'a> Simulation<'a> {
             total_simulations: 0,
         }
     }
+    fn choose_dead_move(&self, state: &mut GameState, drone_idx: usize, action: &mut Action) {
+        let drone = &mut state.drones[drone_idx];
+        let base_angle = action.angle;
+        let (rot, dist) = [
+            (-PI / 3.),
+            (PI / 3.),
+            (2. * PI / 3.),
+            (-2. * PI / 3.),
+            -PI,
+            (PI / 2.),
+            (-PI / 2.),
+            (-PI / 6.),
+            (PI / 6.),
+            (-5. * PI / 6.),
+            (5. * PI / 6.),
+            (PI / 2.),
+            -PI, // for last iteration happen
+        ]
+        .iter()
+        .map(|&rot| {
+            let dir = Vec2::new(1., 0.).rotate(base_angle + rot);
+            let mov = dir * 600.;
+            let new_pos = (drone.pos + mov).clamp(Vec2::new(0., 0.), Vec2::new(9999., 9999.));
+            let nearest_monster = self
+                .tracker
+                .monsters
+                .values()
+                .min_by_key(|m| (m.pos - new_pos).len() as i32)
+                .unwrap();
+            (rot, (nearest_monster.pos - new_pos).len() as i32)
+        })
+        .max_by_key(|(_, dist)| *dist)
+        .unwrap();
+        action.angle += rot;
+        state.score.dead_score += (dist / 2) as f32;
+    }
     fn adjust_drone_move(&self, state: &mut GameState, drone_idx: usize, action: &mut Action) {
         let drone = &mut state.drones[drone_idx];
         let base_angle = action.angle;
-        for rotation in [(-PI / 3.), (PI / 3.), (2. * PI / 3.), (-2. * PI / 3.)] {
+        for rotation in [
+            (-PI / 3.),
+            (PI / 3.),
+            (2. * PI / 3.),
+            (-2. * PI / 3.),
+            -PI,
+            -PI, // for last iteration happen
+        ] {
             let dir = Vec2::new(1., 0.).rotate(action.angle);
             let mov = dir * 600.;
             let new_pos = (drone.pos + mov).clamp(Vec2::new(0., 0.), Vec2::new(9999., 9999.));
@@ -594,6 +640,7 @@ impl<'a> Simulation<'a> {
                 action.angle -= 2. * PI;
             }
         }
+        self.choose_dead_move(state, drone_idx, action);
     }
     fn simulate(&mut self, state: &mut GameState, actions: &mut [Action; 2], iter: usize) {
         for i in 0..2 {
@@ -616,7 +663,7 @@ impl<'a> Simulation<'a> {
                 state.score.exploration_score += self.exploration_map.get_score_by_idx(x, y)
                     * self.score_map.get_score_by_idx(x, y)
                     * state.visit_score(x, y)
-                    / (iter as f32).sqrt();
+                    / (iter as f32);
                 state.visit_cell(x, y);
             }
             let drone = &mut state.drones[i];
@@ -668,7 +715,7 @@ impl<'a> Simulation<'a> {
                         }
                     }
                 }
-                state.score.exploration_score += light_score / (iter as f32).sqrt();
+                state.score.exploration_score += light_score / (iter as f32);
             }
             let drone = &mut state.drones[i];
             if action.light {
@@ -678,6 +725,9 @@ impl<'a> Simulation<'a> {
             }
             state.score.ascent_score +=
                 drone.base_scans_cost as f32 * (1. - drone.pos.y / 10000.) / 5. / GENE_SIZE as f32;
+            if drone.base_scans_cost == 0 {
+                state.score.dive_score += drone.pos.y / 10000. / 5 as f32;
+            }
         }
     }
     fn simulate_all(&mut self, state: &mut GameState, gene: &mut Gene) {
