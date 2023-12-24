@@ -73,4 +73,15 @@ impl Vec2 {
             y: self.x * angle.sin() + self.y * angle.cos(),
         }
     }
+
+    pub fn norm(self) -> Vec2 {
+        if self.len() <= 0.00001 {
+            Vec2 { x: 0., y: 0. }
+        } else {
+            Vec2 {
+                x: self.x / self.len(),
+                y: self.y / self.len(),
+            }
+        }
+    }
 }

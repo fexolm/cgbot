@@ -403,7 +403,7 @@ impl<'a> Simulation<'a> {
             let nearest_monster = self
                 .tracker
                 .monsters
-                .values()
+                .iter()
                 .min_by_key(|m| (m.pos - new_pos).len() as i32)
                 .unwrap();
 
@@ -437,7 +437,7 @@ impl<'a> Simulation<'a> {
             drone.dead = self
                 .tracker
                 .monsters
-                .values()
+                .iter()
                 .any(|m| (m.pos - new_pos).len() < 1200.);
 
             if !drone.dead {
