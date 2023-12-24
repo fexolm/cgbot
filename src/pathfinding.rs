@@ -499,6 +499,9 @@ impl<'a> Simulation<'a> {
             } else {
                 drone.bat += 1;
             }
+
+            state.score.ascent_score +=
+                drone.base_scans_cost as f32 * (1. - drone.pos.y / 10000.) / 5. / GENE_SIZE as f32;
         }
     }
 
@@ -506,12 +509,6 @@ impl<'a> Simulation<'a> {
         for (iter, action) in gene.iter_mut().enumerate() {
             self.simulate(state, action, iter + 1);
         }
-
-        state.score.ascent_score +=
-            state.drones[0].base_scans_cost as f32 * (1. - state.drones[0].pos.y / 10000.) / 5.;
-
-        state.score.ascent_score +=
-            state.drones[1].base_scans_cost as f32 * (1. - state.drones[1].pos.y / 10000.) / 5.;
 
         self.total_simulations += 1;
 

@@ -54,5 +54,10 @@ impl Tracker {
     pub fn update(&mut self, world: &World) {
         self.update_positions();
         self.update_visible(world);
+
+        eprintln!("Monster tracking:");
+        for (id, m) in &self.monsters {
+            eprintln!("id:{}, pos: {}:{}", id, m.pos.x as i32, m.pos.y as i32);
+        }
     }
 }

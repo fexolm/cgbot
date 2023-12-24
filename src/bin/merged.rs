@@ -89,7 +89,7 @@ impl BoundsDetector {
 }
 }
 pub mod maps {
-use super::Creature;
+use super::{meta_strategy, Creature, MetaStrategy};
 use super::{bounds_detector::BoundsDetector, vec2::Vec2, world::World};
 const E_CELLS: usize = 20;
 const E_CELL_SIZE: usize = 10000 / E_CELLS;
@@ -165,6 +165,58 @@ impl ScoreMap {
             .values()
             .any(|drone| drone.blips.contains_key(&id))
     }
+    pub fn update(
+        &mut self,
+        world: &World,
+        bounds_detector: &BoundsDetector,
+        meta_strategy: &MetaStrategy,
+    ) {
+        for x in 0..S_CELLS {
+            for y in 0..S_CELLS {
+                self.map[x][y] = 0.;
+            }
+        }
+        let creatures = world.creatures.values().filter(|c| {
+            c.typ != -1
+                && !Self::is_in_someone_scan(c.id, world)
+                && Self::is_alive(c.id, world)
+                && !world.me.scans.contains(&c.id)
+        });
+        for c in creatures {
+            let bounds = bounds_detector.get_bounds(c.id);
+            let creature_cost = meta_strategy.get_fish_cost(c.id);
+            let (start_x, start_y) = position_to_grid_cell(bounds.top_left, S_CELL_SIZE);
+            let (end_x, end_y) = position_to_grid_cell(bounds.bot_right, S_CELL_SIZE);
+            let (end_x, end_y) = ((end_x + 1).min(S_CELLS), (end_y + 1).min(S_CELLS));
+            let cells_count = (end_x - start_x) * (end_y - start_y);
+            for x in start_x..end_x {
+                for y in start_y..end_y {
+                    self.map[x][y] += creature_cost / (cells_count as f32)
+                }
+            }
+        }
+    }
+    pub fn get_score(&self, pos: Vec2) -> f32 {
+        let (x, y) = position_to_grid_cell(pos, S_CELL_SIZE);
+        self.map[x][y]
+    }
+    pub fn get_score_by_idx(&self, x: usize, y: usize) -> f32 {
+        self.map[x][y]
+    }
+}
+}
+pub mod meta_strategy {
+use std::collections::HashMap;
+use super::*;
+pub struct MetaStrategy {
+    fish_cost: HashMap<i32, f32>,
+}
+impl MetaStrategy {
+    pub fn new() -> Self {
+        MetaStrategy {
+            fish_cost: HashMap::new(),
+        }
+    }
     fn calculate_creature_cost(creature: &Creature, world: &World) -> f32 {
         let mut cost = (creature.typ + 1) as f32;
         if !world.opponent.scans.contains(&creature.id) {
@@ -208,38 +260,15 @@ impl ScoreMap {
         }
         cost
     }
-    pub fn update(&mut self, world: &World, bounds_detector: &BoundsDetector) {
-        for x in 0..S_CELLS {
-            for y in 0..S_CELLS {
-                self.map[x][y] = 0.;
-            }
-        }
-        let creatures = world.creatures.values().filter(|c| {
-            c.typ != -1
-                && !Self::is_in_someone_scan(c.id, world)
-                && Self::is_alive(c.id, world)
-                && !world.me.scans.contains(&c.id)
-        });
-        for c in creatures {
-            let bounds = bounds_detector.get_bounds(c.id);
-            let creature_cost = Self::calculate_creature_cost(c, world);
-            let (start_x, start_y) = position_to_grid_cell(bounds.top_left, S_CELL_SIZE);
-            let (end_x, end_y) = position_to_grid_cell(bounds.bot_right, S_CELL_SIZE);
-            let (end_x, end_y) = ((end_x + 1).min(S_CELLS), (end_y + 1).min(S_CELLS));
-            let cells_count = (end_x - start_x) * (end_y - start_y);
-            for x in start_x..end_x {
-                for y in start_y..end_y {
-                    self.map[x][y] += creature_cost / (cells_count as f32)
-                }
-            }
+    pub fn update(&mut self, world: &World) {
+        let fishes = world.creatures.values().filter(|c| c.typ != -1);
+        for f in fishes {
+            self.fish_cost
+                .insert(f.id, Self::calculate_creature_cost(f, world));
         }
     }
-    pub fn get_score(&self, pos: Vec2) -> f32 {
-        let (x, y) = position_to_grid_cell(pos, S_CELL_SIZE);
-        self.map[x][y]
-    }
-    pub fn get_score_by_idx(&self, x: usize, y: usize) -> f32 {
-        self.map[x][y]
+    pub fn get_fish_cost(&self, id: i32) -> f32 {
+        *self.fish_cost.get(&id).unwrap()
     }
 }
 }
@@ -647,16 +676,14 @@ impl<'a> Simulation<'a> {
             } else {
                 drone.bat += 1;
             }
+            state.score.ascent_score +=
+                drone.base_scans_cost as f32 * (1. - drone.pos.y / 10000.) / 5. / GENE_SIZE as f32;
         }
     }
     fn simulate_all(&mut self, state: &mut GameState, gene: &mut Gene) {
         for (iter, action) in gene.iter_mut().enumerate() {
             self.simulate(state, action, iter + 1);
         }
-        state.score.ascent_score +=
-            state.drones[0].base_scans_cost as f32 * (1. - state.drones[0].pos.y / 10000.) / 5.;
-        state.score.ascent_score +=
-            state.drones[1].base_scans_cost as f32 * (1. - state.drones[1].pos.y / 10000.) / 5.;
         self.total_simulations += 1;
         if state.drones[0].dead || state.drones[1].dead {
             self.dead_simulations += 1;
@@ -672,6 +699,7 @@ pub struct Strategy {
     pub exploration_map: ExplorationMap,
     pub score_map: ScoreMap,
     pub pathfinding: Pathfinding,
+    pub meta_strategy: MetaStrategy,
 }
 impl Strategy {
     pub fn new() -> Self {
@@ -681,6 +709,7 @@ impl Strategy {
             exploration_map: ExplorationMap::new(),
             score_map: ScoreMap::new(),
             pathfinding: Pathfinding::new(),
+            meta_strategy: MetaStrategy::new(),
         }
     }
 }
@@ -689,7 +718,9 @@ impl Strategy {
         self.tracker.update(world);
         self.bounds_detector.update(world);
         self.exploration_map.update(world);
-        self.score_map.update(world, &self.bounds_detector);
+        self.meta_strategy.update(world);
+        self.score_map
+            .update(world, &self.bounds_detector, &self.meta_strategy);
         let actions =
             self.pathfinding
                 .search(world, &self.tracker, &self.exploration_map, &self.score_map);
@@ -749,6 +780,10 @@ impl Tracker {
     pub fn update(&mut self, world: &World) {
         self.update_positions();
         self.update_visible(world);
+        eprintln!("Monster tracking:");
+        for (id, m) in &self.monsters {
+            eprintln!("id:{}, pos: {}:{}", id, m.pos.x as i32, m.pos.y as i32);
+        }
     }
 }
 }
@@ -919,6 +954,7 @@ impl World {
 }
 pub use bounds_detector::*;
 pub use maps::*;
+pub use meta_strategy::*;
 pub use pathfinding::*;
 pub use strategy::*;
 pub use tracker::*;

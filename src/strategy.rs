@@ -6,6 +6,7 @@ pub struct Strategy {
     pub exploration_map: ExplorationMap,
     pub score_map: ScoreMap,
     pub pathfinding: Pathfinding,
+    pub meta_strategy: MetaStrategy,
 }
 
 impl Strategy {
@@ -16,6 +17,7 @@ impl Strategy {
             exploration_map: ExplorationMap::new(),
             score_map: ScoreMap::new(),
             pathfinding: Pathfinding::new(),
+            meta_strategy: MetaStrategy::new(),
         }
     }
 }
@@ -25,7 +27,9 @@ impl Strategy {
         self.tracker.update(world);
         self.bounds_detector.update(world);
         self.exploration_map.update(world);
-        self.score_map.update(world, &self.bounds_detector);
+        self.meta_strategy.update(world);
+        self.score_map
+            .update(world, &self.bounds_detector, &self.meta_strategy);
 
         let actions =
             self.pathfinding

@@ -1,4 +1,4 @@
-use crate::Creature;
+use crate::{meta_strategy, Creature, MetaStrategy};
 
 use super::{bounds_detector::BoundsDetector, vec2::Vec2, world::World};
 
@@ -93,60 +93,12 @@ impl ScoreMap {
             .any(|drone| drone.blips.contains_key(&id))
     }
 
-    fn calculate_creature_cost(creature: &Creature, world: &World) -> f32 {
-        let mut cost = (creature.typ + 1) as f32;
-
-        if !world.opponent.scans.contains(&creature.id) {
-            cost *= 2.;
-        }
-
-        let my_type_count = world
-            .me
-            .scans
-            .iter()
-            .filter(|id| world.creatures.get(&id).unwrap().typ == creature.typ)
-            .count();
-
-        if my_type_count == 4 {
-            cost += 4.;
-
-            let opponent_type_count = world
-                .opponent
-                .scans
-                .iter()
-                .filter(|id| world.creatures.get(&id).unwrap().typ == creature.typ)
-                .count();
-
-            if opponent_type_count < 4 {
-                cost += 4.;
-            }
-        }
-
-        let my_col_count = world
-            .me
-            .scans
-            .iter()
-            .filter(|id| world.creatures.get(&id).unwrap().color == creature.color)
-            .count();
-
-        if my_col_count == 3 {
-            cost += 3.;
-
-            let opponent_col_count = world
-                .opponent
-                .scans
-                .iter()
-                .filter(|id| world.creatures.get(&id).unwrap().color == creature.color)
-                .count();
-
-            if opponent_col_count < 3 {
-                cost += 3.;
-            }
-        }
-        cost
-    }
-
-    pub fn update(&mut self, world: &World, bounds_detector: &BoundsDetector) {
+    pub fn update(
+        &mut self,
+        world: &World,
+        bounds_detector: &BoundsDetector,
+        meta_strategy: &MetaStrategy,
+    ) {
         for x in 0..S_CELLS {
             for y in 0..S_CELLS {
                 self.map[x][y] = 0.;
@@ -163,7 +115,7 @@ impl ScoreMap {
         for c in creatures {
             let bounds = bounds_detector.get_bounds(c.id);
 
-            let creature_cost = Self::calculate_creature_cost(c, world);
+            let creature_cost = meta_strategy.get_fish_cost(c.id);
 
             let (start_x, start_y) = position_to_grid_cell(bounds.top_left, S_CELL_SIZE);
             let (end_x, end_y) = position_to_grid_cell(bounds.bot_right, S_CELL_SIZE);
